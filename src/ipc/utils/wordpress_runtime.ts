@@ -15,6 +15,7 @@ import {
   checkWordPressBinaries
 } from './wordpress_binary_utils';
 import { checkPortInUse } from './port_utils';
+import { setupWordPressCore, createDefaultTheme } from './wordpress_core_utils';
 
 const logger = log.scope('wordpress-runtime');
 
@@ -89,6 +90,12 @@ export class WordPressRuntime {
       // Create PHP config
       await createPHPConfig(appPath, phpPort);
 
+      // Setup WordPress core files if needed
+      await setupWordPressCore(appPath);
+      
+      // Create default theme if needed
+      await createDefaultTheme(appPath);
+
       // Start PHP
       const php = await this.startPHP(appPath, phpPort);
 
@@ -117,7 +124,7 @@ export class WordPressRuntime {
   /**
    * Initialize MySQL database
    */
-  private async initializeMySQL(appPath: string, port: number): Promise<void> {
+  private async initializeMySQL(appPath: string, _port: number): Promise<void> {
     logger.info('Initializing MySQL database...');
     
     const mysqldPath = getWordPressBinaryPath('mysqld');

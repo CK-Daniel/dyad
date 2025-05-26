@@ -26,6 +26,8 @@ import { Button } from "@/components/ui/button";
 import { ExternalLink } from "lucide-react";
 import { ImportAppButton } from "@/components/ImportAppButton";
 import { showError } from "@/lib/toast";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { Code, Globe } from "lucide-react";
 
 // Adding an export for attachments
 export interface HomeSubmitOptions {
@@ -47,6 +49,7 @@ export default function HomePage() {
   const [releaseNotesOpen, setReleaseNotesOpen] = useState(false);
   const [releaseUrl, setReleaseUrl] = useState("");
   const { theme } = useTheme();
+  const [appType, setAppType] = useState<"react" | "wordpress">("react");
 
   useEffect(() => {
     const updateLastVersionLaunched = async () => {
@@ -116,6 +119,7 @@ export default function HomePage() {
       // Create the chat and navigate
       const result = await IpcClient.getInstance().createApp({
         name: generateCuteAppName(),
+        appType: appType,
       });
 
       // Stream the message with attachments
@@ -169,6 +173,21 @@ export default function HomePage() {
 
       <div className="w-full">
         <ImportAppButton />
+        
+        {/* App Type Selector */}
+        <div className="flex justify-center mb-4">
+          <ToggleGroup type="single" value={appType} onValueChange={(value) => value && setAppType(value as "react" | "wordpress")}>
+            <ToggleGroupItem value="react" aria-label="React app">
+              <Code className="h-4 w-4 mr-2" />
+              React App
+            </ToggleGroupItem>
+            <ToggleGroupItem value="wordpress" aria-label="WordPress site">
+              <Globe className="h-4 w-4 mr-2" />
+              WordPress Site
+            </ToggleGroupItem>
+          </ToggleGroup>
+        </div>
+        
         <HomeChatInput onSubmit={handleSubmit} />
 
         <div className="flex flex-col gap-4 mt-4">
@@ -177,7 +196,10 @@ export default function HomePage() {
               <button
                 type="button"
                 key={index}
-                onClick={() => setInputValue(`Build me a ${item.label}`)}
+                onClick={() => {
+                  const prefix = appType === 'wordpress' ? 'Build me a WordPress ' : 'Build me a ';
+                  setInputValue(`${prefix}${item.label}`);
+                }}
                 className="flex items-center gap-3 px-4 py-2 rounded-xl border border-gray-200
                            bg-white/50 backdrop-blur-sm
                            transition-all duration-200

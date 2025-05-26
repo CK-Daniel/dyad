@@ -1,0 +1,20 @@
+/**
+ * Custom Plugin Styles
+ */
+
+.custom-plugin-hello {
+    padding: 20px;
+    background-color: #f0f0f0;
+    border-radius: 5px;
+    margin: 20px 0;
+    font-size: 18px;
+    text-align: center;
+}
+
+/* Admin styles */
+.wp-admin .custom-plugin-admin-notice {
+    padding: 10px;
+    margin: 10px 0;
+    border-left: 4px solid #0073aa;
+    background: #f1f1f1;
+}

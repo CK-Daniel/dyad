@@ -24,6 +24,10 @@ export function useRunApp() {
     const matchesProxyServerStart = output.message.includes(
       "[dyad-proxy-server]started=[",
     );
+    const matchesWordPressStart = output.message.includes(
+      "[wordpress-runtime]started=[",
+    );
+    
     if (matchesProxyServerStart) {
       // Extract both proxy URL and original URL using regex
       const proxyUrlMatch = output.message.match(
@@ -38,6 +42,20 @@ export function useRunApp() {
           appUrl: proxyUrl,
           appId: appId!,
           originalUrl: originalUrl!,
+        });
+      }
+    } else if (matchesWordPressStart) {
+      // Extract WordPress URL
+      const wpUrlMatch = output.message.match(
+        /\[wordpress-runtime\]started=\[(.*?)\]/,
+      );
+      
+      if (wpUrlMatch && wpUrlMatch[1]) {
+        const wpUrl = wpUrlMatch[1];
+        setAppUrlObj({
+          appUrl: wpUrl,
+          appId: appId!,
+          originalUrl: wpUrl, // For WordPress, proxy isn't used
         });
       }
     }

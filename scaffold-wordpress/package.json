@@ -1,0 +1,13 @@
+{
+  "name": "wordpress-project",
+  "version": "1.0.0",
+  "description": "WordPress project created with Dyad",
+  "private": true,
+  "scripts": {
+    "dev": "echo 'WordPress development server is managed by Dyad'",
+    "build": "echo 'WordPress build is managed by Dyad'"
+  },
+  "keywords": ["wordpress", "dyad"],
+  "author": "",
+  "license": "GPL-2.0-or-later"
+}

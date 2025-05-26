@@ -30,7 +30,6 @@ import {
 } from "@/components/ui/dialog";
 import { GitHubConnector } from "@/components/GitHubConnector";
 import { SupabaseConnector } from "@/components/SupabaseConnector";
-import { WordPressToolbar } from "@/components/WordPressToolbar";
 import { showError } from "@/lib/toast";
 
 export default function AppDetailsPage() {
@@ -260,12 +259,6 @@ export default function AppDetailsPage() {
           </div>
         </div>
         
-        {/* WordPress Toolbar for WordPress apps */}
-        {selectedApp.appType === 'wordpress' && (
-          <div className="mb-4 pb-4 border-b">
-            <WordPressToolbar app={selectedApp} onRefresh={refreshApps} />
-          </div>
-        )}
         
         <div className="mt-4 flex flex-col gap-2">
           <Button

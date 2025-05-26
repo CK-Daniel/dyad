@@ -237,25 +237,9 @@ export function registerWordPressHandlers() {
       );
     }
     
-    // Download WordPress core if not present
+    // WordPress core will be set up by the runtime when it starts
     const appPath = path.join(process.env.DYAD_APPS_PATH || '', app.path);
     const wordpressPath = path.join(appPath, 'wordpress');
-    const wpContentPath = path.join(wordpressPath, 'wp-content');
-    
-    // Check if WordPress is already installed
-    const wpContentExists = await fs.access(wpContentPath).then(() => true).catch(() => false);
-    
-    if (!wpContentExists) {
-      // Download WordPress
-      logger.info('Downloading WordPress core...');
-      // In a real implementation, this would download WordPress
-      // For now, we'll create the directory structure
-      await fs.mkdir(wordpressPath, { recursive: true });
-      await fs.mkdir(path.join(wordpressPath, 'wp-content'), { recursive: true });
-      await fs.mkdir(path.join(wordpressPath, 'wp-content', 'themes'), { recursive: true });
-      await fs.mkdir(path.join(wordpressPath, 'wp-content', 'plugins'), { recursive: true });
-      await fs.mkdir(path.join(wordpressPath, 'wp-content', 'uploads'), { recursive: true });
-    }
     
     // Run WordPress installation
     const installCommand = [

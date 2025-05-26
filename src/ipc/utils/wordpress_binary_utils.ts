@@ -2,6 +2,7 @@ import { app } from 'electron';
 import path from 'path';
 import { platform, arch } from 'os';
 import fs from 'fs/promises';
+import { existsSync } from 'fs';
 import { getAvailablePort } from './port_utils';
 import log from 'electron-log';
 
@@ -13,13 +14,55 @@ export type WordPressBinary = 'php' | 'mysql' | 'mysqld' | 'wp-cli';
  * Get the path to a WordPress binary based on the current platform and architecture
  */
 export function getWordPressBinaryPath(binary: WordPressBinary): string {
-  const resourcesPath = app.isPackaged 
-    ? process.resourcesPath 
-    : path.join(__dirname, '../../../');
-  
   const platformName = platform();
   const archName = arch();
   const platformArch = `${platformName}-${archName}`;
+  
+  // In development, try to use system binaries first
+  if (!app.isPackaged) {
+    // Map binary names to common system commands
+    const systemBinaries: Record<WordPressBinary, string> = {
+      'php': 'php',
+      'mysql': 'mysql',
+      'mysqld': 'mysqld',
+      'wp-cli': 'wp'
+    };
+    
+    const systemBinary = systemBinaries[binary];
+    
+    // For wp-cli, check the downloaded version first
+    if (binary === 'wp-cli') {
+      const wpCliPath = path.join(
+        __dirname, '../../../',
+        'extraResources',
+        'wordpress-runtime',
+        platformArch,
+        'wp-cli',
+        'bin',
+        platformName === 'win32' ? 'wp.bat' : 'wp'
+      );
+      
+      if (existsSync(wpCliPath)) {
+        logger.debug(`Using downloaded WP-CLI: ${wpCliPath}`);
+        return wpCliPath;
+      }
+    }
+    
+    // Try to find system binary
+    try {
+      const which = require('which');
+      const systemPath = which.sync(systemBinary);
+      logger.debug(`Using system ${binary}: ${systemPath}`);
+      return systemPath;
+    } catch {
+      logger.debug(`System ${binary} not found, falling back to bundled version`);
+    }
+  }
+  
+  // Production path or fallback for development
+  const resourcesPath = app.isPackaged 
+    ? process.resourcesPath 
+    : path.join(__dirname, '../../../');
   
   // Handle different binary names across platforms
   let binaryName = binary;

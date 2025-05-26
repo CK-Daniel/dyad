@@ -56,6 +56,7 @@ const config: ForgeConfig = {
     ],
     icon: "./assets/icon/logo",
     extraResource: [
+      "./scaffold",
       "./scaffold-wordpress",
       // WordPress binaries will be downloaded during build
       // and placed in extraResources/wordpress-runtime/

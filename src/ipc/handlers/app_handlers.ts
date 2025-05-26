@@ -28,6 +28,7 @@ import { readSettings } from "../../main/settings";
 import fixPath from "fix-path";
 import { getGitAuthor } from "../utils/git_author";
 import killPort from "kill-port";
+import { wordpressRuntime } from "../utils/wordpress_runtime";
 import util from "util";
 import log from "electron-log";
 import { getSupabaseProjectName } from "../../supabase_admin/supabase_management_client";
@@ -179,6 +180,7 @@ export function registerAppHandlers() {
           name: params.name,
           // Use the name as the path for now
           path: appPath,
+          appType: params.appType || 'react', // Default to react if not specified
         })
         .returning();
 
@@ -194,8 +196,9 @@ export function registerAppHandlers() {
       // Because scaffold is inside ASAR and it does NOT
       // behave like a regular directory if you use fs.cp
       // https://www.electronjs.org/docs/latest/tutorial/asar-archives#limitations-of-the-node-api
+      const scaffoldDir = app.appType === 'wordpress' ? 'scaffold-wordpress' : 'scaffold';
       await copyDirectoryRecursive(
-        path.join(__dirname, "..", "..", "scaffold"),
+        path.join(__dirname, "..", "..", scaffoldDir),
         fullAppPath,
       );
       // Initialize git repo and create first commit
@@ -341,11 +344,41 @@ export function registerAppHandlers() {
           throw new Error("App not found");
         }
 
-        logger.debug(`Starting app ${appId} in path ${app.path}`);
+        logger.debug(`Starting app ${appId} in path ${app.path} with type ${app.appType}`);
 
         const appPath = getDyadAppPath(app.path);
         try {
-          await executeApp({ appPath, appId, event });
+          // Route to appropriate handler based on app type
+          if (app.appType === 'wordpress') {
+            // Start WordPress runtime
+            const { phpPort, mysqlPort } = await wordpressRuntime.start(appId.toString(), appPath);
+            
+            // Update app with ports
+            await db.update(apps)
+              .set({ 
+                phpPort,
+                mysqlPort,
+                updatedAt: new Date()
+              })
+              .where(eq(apps.id, appId));
+            
+            // Send WordPress URL to preview panel
+            event.sender.send("app:output", {
+              type: "stdout",
+              message: `[wordpress-runtime]started=[http://localhost:${phpPort}] phpPort=[${phpPort}]`,
+              appId,
+            });
+            
+            // Track as running (without a Node process)
+            runningApps.set(appId, { 
+              process: null as any, // WordPress doesn't have a Node process
+              processId: processCounter.increment(),
+              appType: 'wordpress'
+            });
+          } else {
+            // Start React app as before
+            await executeApp({ appPath, appId, event });
+          }
 
           return;
         } catch (error: any) {
@@ -379,9 +412,35 @@ export function registerAppHandlers() {
           return;
         }
 
-        const { process, processId } = appInfo;
+        const { process, processId, appType } = appInfo;
+        
+        // Handle WordPress apps differently
+        if (appType === 'wordpress') {
+          logger.log(`Stopping WordPress app ${appId}`);
+          try {
+            await wordpressRuntime.stop(appId.toString());
+            
+            // Clear ports in database
+            await db.update(apps)
+              .set({ 
+                phpPort: null,
+                mysqlPort: null,
+                updatedAt: new Date()
+              })
+              .where(eq(apps.id, appId));
+            
+            runningApps.delete(appId);
+            return;
+          } catch (error: any) {
+            logger.error(`Error stopping WordPress app ${appId}:`, error);
+            runningApps.delete(appId); // Clean up anyway
+            throw new Error(`Failed to stop WordPress app ${appId}: ${error.message}`);
+          }
+        }
+        
+        // Handle React apps (with process)
         logger.log(
-          `Found running app ${appId} with processId ${processId} (PID: ${process.pid}). Attempting to stop.`,
+          `Found running app ${appId} with processId ${processId} (PID: ${process?.pid}). Attempting to stop.`,
         );
 
         // Check if the process is already exited or closed
@@ -429,18 +488,29 @@ export function registerAppHandlers() {
           // First stop the app if it's running
           const appInfo = runningApps.get(appId);
           if (appInfo) {
-            const { process, processId } = appInfo;
+            const { process, processId, appType } = appInfo;
             logger.log(
-              `Stopping app ${appId} (processId ${processId}) before restart`,
+              `Stopping app ${appId} (processId ${processId}, type ${appType}) before restart`,
             );
 
-            await killProcess(process);
+            if (appType === 'wordpress') {
+              await wordpressRuntime.stop(appId.toString());
+              await db.update(apps)
+                .set({ 
+                  phpPort: null,
+                  mysqlPort: null,
+                  updatedAt: new Date()
+                })
+                .where(eq(apps.id, appId));
+            } else if (process) {
+              await killProcess(process);
+            }
             runningApps.delete(appId);
           } else {
             logger.log(`App ${appId} not running. Proceeding to start.`);
           }
 
-          // Kill any orphaned process on port 32100 (in case previous run left it)
+          // Kill any orphaned process on port 32100 (for React apps)
           await killProcessOnPort(32100);
 
           // Now start the app again
@@ -472,10 +542,35 @@ export function registerAppHandlers() {
           }
 
           logger.debug(
-            `Executing app ${appId} in path ${app.path} after restart request`,
-          ); // Adjusted log
+            `Restarting app ${appId} in path ${app.path} with type ${app.appType}`,
+          );
 
-          await executeApp({ appPath, appId, event }); // This will handle starting either mode
+          // Route to appropriate handler based on app type (same as run-app)
+          if (app.appType === 'wordpress') {
+            const { phpPort, mysqlPort } = await wordpressRuntime.start(appId.toString(), appPath);
+            
+            await db.update(apps)
+              .set({ 
+                phpPort,
+                mysqlPort,
+                updatedAt: new Date()
+              })
+              .where(eq(apps.id, appId));
+            
+            event.sender.send("app:output", {
+              type: "stdout",
+              message: `[wordpress-runtime]started=[http://localhost:${phpPort}] phpPort=[${phpPort}]`,
+              appId,
+            });
+            
+            runningApps.set(appId, { 
+              process: null as any,
+              processId: processCounter.increment(),
+              appType: 'wordpress'
+            });
+          } else {
+            await executeApp({ appPath, appId, event });
+          }
 
           return;
         } catch (error) {

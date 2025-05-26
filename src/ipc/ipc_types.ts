@@ -30,6 +30,7 @@ export interface ChatResponseEnd {
 
 export interface CreateAppParams {
   name: string;
+  appType?: 'react' | 'wordpress';
 }
 
 export interface CreateAppResult {
@@ -69,9 +70,9 @@ export interface App {
   githubRepo: string | null;
   supabaseProjectId: string | null;
   supabaseProjectName: string | null;
-  appType?: 'react' | 'wordpress';
-  phpPort?: number | null;
-  mysqlPort?: number | null;
+  appType: 'react' | 'wordpress' | null;
+  phpPort: number | null;
+  mysqlPort: number | null;
 }
 
 export interface Version {
