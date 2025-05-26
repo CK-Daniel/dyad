@@ -72,8 +72,28 @@ export class WordPressRuntime {
       const dataDirExists = await fs.access(dataDir).then(() => true).catch(() => false);
       
       if (!dataDirExists) {
+        logger.info(`MySQL data directory does not exist at ${dataDir}. Initializing...`);
         await initializeMySQLDataDir(appPath);
-        await this.initializeMySQL(appPath, mysqlPort);
+        
+        try {
+          await this.initializeMySQL(appPath, mysqlPort);
+        } catch (error) {
+          logger.error('MySQL initialization failed:', error);
+          // On macOS, sometimes we need to clean up and retry
+          if (process.platform === 'darwin') {
+            logger.info('Attempting to clean up and retry MySQL initialization on macOS...');
+            const fs = require('fs').promises;
+            try {
+              await fs.rm(dataDir, { recursive: true, force: true });
+              await initializeMySQLDataDir(appPath);
+              await this.initializeMySQL(appPath, mysqlPort);
+            } catch (retryError) {
+              throw new Error(`MySQL initialization failed after retry: ${retryError}`);
+            }
+          } else {
+            throw error;
+          }
+        }
       }
 
       // Start MySQL
@@ -134,30 +154,48 @@ export class WordPressRuntime {
     const initProcess = spawn(mysqldPath, [
       '--initialize-insecure',
       `--datadir=${dataDir}`,
-      '--explicit_defaults_for_timestamp'
+      '--explicit_defaults_for_timestamp',
+      '--log-error-verbosity=3'
     ], {
       cwd: appPath,
-      env: { ...process.env }
+      env: { ...process.env },
+      stdio: ['ignore', 'pipe', 'pipe']
     });
 
     return new Promise((resolve, reject) => {
+      let output = '';
       let errorOutput = '';
+      const timeout = setTimeout(() => {
+        initProcess.kill();
+        reject(new Error('MySQL initialization timed out after 60 seconds'));
+      }, 60000);
+      
+      initProcess.stdout?.on('data', (data) => {
+        output += data.toString();
+        logger.debug('MySQL init output:', data.toString());
+      });
       
       initProcess.stderr?.on('data', (data) => {
         errorOutput += data.toString();
-        logger.debug('MySQL init:', data.toString());
+        logger.debug('MySQL init stderr:', data.toString());
       });
 
       initProcess.on('close', (code) => {
+        clearTimeout(timeout);
         if (code === 0) {
           logger.info('MySQL initialized successfully');
           resolve();
         } else {
-          reject(new Error(`MySQL initialization failed: ${errorOutput}`));
+          logger.error('MySQL initialization failed with code:', code);
+          logger.error('MySQL init output:', output);
+          logger.error('MySQL init stderr:', errorOutput);
+          reject(new Error(`MySQL initialization failed with code ${code}: ${errorOutput}`));
         }
       });
 
       initProcess.on('error', (error) => {
+        clearTimeout(timeout);
+        logger.error('Failed to spawn MySQL initialization process:', error);
         reject(new Error(`Failed to start MySQL initialization: ${error.message}`));
       });
     });
@@ -178,28 +216,52 @@ export class WordPressRuntime {
       '--bind-address=127.0.0.1',
       '--skip-networking=0',
       '--default-authentication-plugin=mysql_native_password',
-      '--console'
+      '--console',
+      '--log-error-verbosity=3'
     ], {
       cwd: appPath,
       env: { ...process.env },
-      detached: false
+      detached: false,
+      stdio: ['ignore', 'pipe', 'pipe']
     });
+
+    let mysqlOutput = '';
+    let mysqlError = '';
 
     // Log MySQL output
     mysql.stdout?.on('data', (data) => {
-      logger.debug('MySQL:', data.toString());
+      const output = data.toString();
+      mysqlOutput += output;
+      logger.debug('MySQL:', output);
     });
 
     mysql.stderr?.on('data', (data) => {
-      logger.debug('MySQL error:', data.toString());
+      const error = data.toString();
+      mysqlError += error;
+      logger.debug('MySQL error:', error);
+      
+      // Check for common issues
+      if (error.includes('Permission denied')) {
+        logger.error('MySQL permission error - check file permissions in:', dataDir);
+      } else if (error.includes('Another process with pid')) {
+        logger.error('MySQL already running - port conflict on:', port);
+      } else if (error.includes('Can\'t create/write to file')) {
+        logger.error('MySQL cannot write to data directory:', dataDir);
+      }
     });
 
     mysql.on('error', (error) => {
       logger.error('MySQL process error:', error);
+      logger.error('MySQL stdout:', mysqlOutput);
+      logger.error('MySQL stderr:', mysqlError);
     });
 
     mysql.on('exit', (code, signal) => {
       logger.info(`MySQL process exited with code ${code} and signal ${signal}`);
+      if (code !== 0 && code !== null) {
+        logger.error('MySQL failed to start. Last output:', mysqlOutput);
+        logger.error('MySQL failed to start. Last error:', mysqlError);
+      }
     });
 
     // Wait for MySQL to be ready
@@ -214,8 +276,10 @@ export class WordPressRuntime {
   /**
    * Wait for MySQL to be ready
    */
-  private async waitForMySQL(port: number, maxAttempts = 30): Promise<void> {
+  private async waitForMySQL(port: number, maxAttempts = 60): Promise<void> {
     const mysqlPath = getWordPressBinaryPath('mysql');
+    
+    logger.info(`Waiting for MySQL to start on port ${port} (up to ${maxAttempts} seconds)...`);
     
     for (let i = 0; i < maxAttempts; i++) {
       try {
@@ -224,7 +288,14 @@ export class WordPressRuntime {
           '-P', port.toString(),
           '-u', 'root',
           '-e', 'SELECT 1'
-        ]);
+        ], {
+          stdio: ['ignore', 'pipe', 'pipe']
+        });
+
+        let stderr = '';
+        testProcess.stderr?.on('data', (data) => {
+          stderr += data.toString();
+        });
 
         const exitCode = await new Promise<number>((resolve) => {
           testProcess.on('close', resolve);
@@ -234,6 +305,16 @@ export class WordPressRuntime {
           logger.info('MySQL is ready');
           return;
         }
+        
+        // Log progress every 5 seconds
+        if (i > 0 && i % 5 === 0) {
+          logger.info(`Still waiting for MySQL... (${i}/${maxAttempts} seconds)`);
+        }
+        
+        // Log specific errors that might help diagnose issues
+        if (stderr.includes('ERROR') && i === maxAttempts - 1) {
+          logger.error('MySQL connection error:', stderr);
+        }
       } catch (error) {
         // Ignore connection errors while waiting
       }
@@ -241,7 +322,7 @@ export class WordPressRuntime {
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
 
-    throw new Error('MySQL failed to start within timeout period');
+    throw new Error(`MySQL failed to start within ${maxAttempts} seconds on port ${port}`);
   }
 
   /**

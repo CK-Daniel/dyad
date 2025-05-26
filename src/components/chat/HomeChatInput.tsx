@@ -2,7 +2,7 @@ import { SendIcon, StopCircleIcon, Paperclip } from "lucide-react";
 import type React from "react";
 import { useEffect, useRef } from "react";
 
-import { useSettings } from "@/hooks/useSettings";
+import { useSettings, isTelemetryOptedIn } from "@/hooks/useSettings";
 import { homeChatInputValueAtom } from "@/atoms/chatAtoms"; // Use a different atom for home input
 import { useAtom } from "jotai";
 import { useStreamChat } from "@/hooks/useStreamChat";
@@ -70,7 +70,9 @@ export function HomeChatInput({
 
     // Clear attachments as part of submission process
     clearAttachments();
-    posthog.capture("chat:home_submit");
+    if (isTelemetryOptedIn()) {
+      posthog.capture("chat:home_submit");
+    }
   };
 
   if (!settings) {

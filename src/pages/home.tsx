@@ -5,7 +5,7 @@ import { selectedAppIdAtom } from "@/atoms/appAtoms";
 import { IpcClient } from "@/ipc/ipc_client";
 import { generateCuteAppName } from "@/lib/utils";
 import { useLoadApps } from "@/hooks/useLoadApps";
-import { useSettings } from "@/hooks/useSettings";
+import { useSettings, isTelemetryOptedIn } from "@/hooks/useSettings";
 import { SetupBanner } from "@/components/SetupBanner";
 import { isPreviewOpenAtom } from "@/atoms/viewAtoms";
 import { useState, useEffect, useCallback } from "react";
@@ -134,7 +134,9 @@ export default function HomePage() {
       setSelectedAppId(result.app.id);
       setIsPreviewOpen(false);
       await refreshApps(); // Ensure refreshApps is awaited if it's async
-      posthog.capture("home:chat-submit");
+      if (isTelemetryOptedIn()) {
+        posthog.capture("home:chat-submit");
+      }
       navigate({ to: "/chat", search: { id: result.chatId } });
     } catch (error) {
       console.error("Failed to create chat:", error);

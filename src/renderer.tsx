@@ -91,16 +91,19 @@ function App() {
   useEffect(() => {
     // Subscribe to navigation state changes
     const unsubscribe = router.subscribe("onResolved", (navigation) => {
-      // Capture the navigation event in PostHog
-      posthog.capture("navigation", {
-        toPath: navigation.toLocation.pathname,
-        fromPath: navigation.fromLocation?.pathname,
-      });
+      // Only capture events if telemetry is opted in
+      if (isTelemetryOptedIn()) {
+        // Capture the navigation event in PostHog
+        posthog.capture("navigation", {
+          toPath: navigation.toLocation.pathname,
+          fromPath: navigation.fromLocation?.pathname,
+        });
 
-      // Optionally capture as a standard pageview as well
-      posthog.capture("$pageview", {
-        path: navigation.toLocation.pathname,
-      });
+        // Optionally capture as a standard pageview as well
+        posthog.capture("$pageview", {
+          path: navigation.toLocation.pathname,
+        });
+      }
     });
 
     // Clean up subscription when component unmounts
