@@ -287,22 +287,34 @@ export function registerChatStreamHandlers() {
           );
         }
 
-        let systemPrompt = constructSystemPrompt({
-          aiRules: await readAiRules(getDyadAppPath(updatedChat.app.path)),
-        });
-        if (
-          updatedChat.app?.supabaseProjectId &&
-          settings.supabase?.accessToken?.value
-        ) {
-          systemPrompt +=
-            "\n\n" +
-            SUPABASE_AVAILABLE_SYSTEM_PROMPT +
-            "\n\n" +
-            (await getSupabaseContext({
-              supabaseProjectId: updatedChat.app.supabaseProjectId,
-            }));
+        // Use WordPress prompt for WordPress apps
+        let systemPrompt: string;
+        if (updatedChat.app.appType === 'wordpress') {
+          const { getWordPressSystemPrompt } = await import('../../prompts/wordpress_system_prompt');
+          systemPrompt = getWordPressSystemPrompt(getDyadAppPath(updatedChat.app.path));
+          // Also read any custom AI rules
+          const customRules = await readAiRules(getDyadAppPath(updatedChat.app.path));
+          if (customRules) {
+            systemPrompt += "\n\n## Custom Project Rules\n" + customRules;
+          }
         } else {
-          systemPrompt += "\n\n" + SUPABASE_NOT_AVAILABLE_SYSTEM_PROMPT;
+          systemPrompt = constructSystemPrompt({
+            aiRules: await readAiRules(getDyadAppPath(updatedChat.app.path)),
+          });
+          if (
+            updatedChat.app?.supabaseProjectId &&
+            settings.supabase?.accessToken?.value
+          ) {
+            systemPrompt +=
+              "\n\n" +
+              SUPABASE_AVAILABLE_SYSTEM_PROMPT +
+              "\n\n" +
+              (await getSupabaseContext({
+                supabaseProjectId: updatedChat.app.supabaseProjectId,
+              }));
+          } else {
+            systemPrompt += "\n\n" + SUPABASE_NOT_AVAILABLE_SYSTEM_PROMPT;
+          }
         }
         const isSummarizeIntent = req.prompt.startsWith(
           "Summarize from chat-id=",

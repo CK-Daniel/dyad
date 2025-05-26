@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { IpcClient } from "@/ipc/ipc_client";
 import { useMutation } from "@tanstack/react-query";
 import { showError, showSuccess } from "@/lib/toast";
-import { Folder, X, Loader2, Info } from "lucide-react";
+import { Folder, X, Loader2, Info, Globe, Code } from "lucide-react";
 import { Input } from "@/components/ui/input";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -39,6 +39,7 @@ export function ImportAppDialog({ isOpen, onClose }: ImportAppDialogProps) {
   const [customAppName, setCustomAppName] = useState<string>("");
   const [nameExists, setNameExists] = useState<boolean>(false);
   const [isCheckingName, setIsCheckingName] = useState<boolean>(false);
+  const [appType, setAppType] = useState<'react' | 'wordpress' | null>(null);
   const navigate = useNavigate();
   const { streamMessage } = useStreamChat({ hasChatId: false });
   const { refreshApps } = useLoadApps();
@@ -69,6 +70,7 @@ export function ImportAppDialog({ isOpen, onClose }: ImportAppDialogProps) {
       });
       setHasAiRules(aiRulesCheck.exists);
       setSelectedPath(result.path);
+      setAppType(result.appType || 'react');
 
       // Use the folder name from the IPC response
       setCustomAppName(result.name);
@@ -89,6 +91,7 @@ export function ImportAppDialog({ isOpen, onClose }: ImportAppDialogProps) {
       return IpcClient.getInstance().importApp({
         path: selectedPath,
         appName: customAppName,
+        appType: appType || 'react',
       });
     },
     onSuccess: async (result) => {
@@ -101,9 +104,11 @@ export function ImportAppDialog({ isOpen, onClose }: ImportAppDialogProps) {
 
       navigate({ to: "/chat", search: { id: result.chatId } });
       if (!hasAiRules) {
+        const prompt = appType === 'wordpress' 
+          ? "Generate an AI_RULES.md file for this WordPress project. Describe the theme/plugin structure, any custom functionality, and guidelines for WordPress development best practices."
+          : "Generate an AI_RULES.md file for this app. Describe the tech stack in 5-10 bullet points and describe clear rules about what libraries to use for what.";
         streamMessage({
-          prompt:
-            "Generate an AI_RULES.md file for this app. Describe the tech stack in 5-10 bullet points and describe clear rules about what libraries to use for what.",
+          prompt,
           chatId: result.chatId,
         });
       }
@@ -128,6 +133,7 @@ export function ImportAppDialog({ isOpen, onClose }: ImportAppDialogProps) {
     setHasAiRules(null);
     setCustomAppName("");
     setNameExists(false);
+    setAppType(null);
   };
 
   const handleAppNameChange = async (
@@ -196,6 +202,29 @@ export function ImportAppDialog({ isOpen, onClose }: ImportAppDialogProps) {
                   </Button>
                 </div>
               </div>
+
+              {appType && (
+                <div className="rounded-md border p-3 bg-muted/50">
+                  <div className="flex items-center gap-2">
+                    {appType === 'wordpress' ? (
+                      <>
+                        <Globe className="h-4 w-4 text-blue-500" />
+                        <span className="text-sm font-medium">WordPress Project</span>
+                      </>
+                    ) : (
+                      <>
+                        <Code className="h-4 w-4 text-green-500" />
+                        <span className="text-sm font-medium">React Application</span>
+                      </>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {appType === 'wordpress' 
+                      ? "Detected WordPress files. PHP and MySQL will be configured automatically."
+                      : "React app detected. Development server will be configured."}
+                  </p>
+                </div>
+              )}
 
               <div className="space-y-2">
                 {nameExists && (

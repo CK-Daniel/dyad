@@ -1,0 +1,68 @@
+# WordPress Core (managed by Dyad)
+/wordpress/*
+!/wordpress/wp-content/
+/wordpress/wp-content/*
+!/wordpress/wp-content/themes/
+!/wordpress/wp-content/plugins/
+!/wordpress/wp-content/mu-plugins/
+
+# Keep custom themes and plugins
+/wordpress/wp-content/themes/*
+!/wordpress/wp-content/themes/custom-theme/
+
+/wordpress/wp-content/plugins/*
+!/wordpress/wp-content/plugins/custom-plugin/
+
+# WordPress uploads
+/wordpress/wp-content/uploads/
+
+# WordPress cache
+/wordpress/wp-content/cache/
+/wordpress/wp-content/wp-cache-config.php
+/wordpress/wp-content/advanced-cache.php
+
+# WordPress configuration (contains sensitive data)
+/wp-config.php
+
+# Local development
+/.wordpress-data/
+*.log
+.htaccess
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Composer
+/vendor/
+composer.lock
+
+# Node
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Build files
+/build/
+/dist/
+
+# Environment files
+.env
+.env.*
+
+# Backup files
+*.sql
+*.tar.gz
+*.zip
+backup/
+
+# Debug
+debug.log
+error_log

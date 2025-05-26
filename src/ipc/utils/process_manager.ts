@@ -1,10 +1,12 @@
 import { ChildProcess } from "node:child_process";
 import treeKill from "tree-kill";
+import { wordpressRuntime } from './wordpress_runtime';
 
 // Define a type for the value stored in runningApps
 export interface RunningAppInfo {
   process: ChildProcess;
   processId: number;
+  appType?: 'react' | 'wordpress';
 }
 
 // Store running app processes
@@ -96,9 +98,49 @@ export function removeAppIfCurrentProcess(
     console.log(
       `Removed app ${appId} (processId ${currentAppInfo.processId}) from running map. Current size: ${runningApps.size}`,
     );
+    
+    // If it's a WordPress app, stop WordPress runtime
+    if (currentAppInfo.appType === 'wordpress') {
+      wordpressRuntime.stop(appId.toString()).catch(err => {
+        console.error(`Error stopping WordPress runtime for app ${appId}:`, err);
+      });
+    }
   } else {
     console.log(
       `App ${appId} process was already removed or replaced in running map. Ignoring.`,
     );
   }
+}
+
+/**
+ * Stop all apps including WordPress apps
+ */
+export async function stopAllApps(): Promise<void> {
+  console.log(`Stopping all ${runningApps.size} running apps...`);
+  
+  // Stop all running processes
+  const stopPromises: Promise<void>[] = [];
+  
+  for (const [appId, appInfo] of runningApps.entries()) {
+    if (appInfo.appType === 'wordpress') {
+      // Stop WordPress runtime
+      stopPromises.push(
+        wordpressRuntime.stop(appId.toString()).catch(err => {
+          console.error(`Error stopping WordPress for app ${appId}:`, err);
+        })
+      );
+    } else {
+      // Stop regular process
+      stopPromises.push(killProcess(appInfo.process));
+    }
+  }
+  
+  await Promise.all(stopPromises);
+  
+  // Also stop any WordPress processes not tracked in runningApps
+  await wordpressRuntime.stopAll();
+  
+  // Clear the map
+  runningApps.clear();
+  console.log('All apps stopped');
 }

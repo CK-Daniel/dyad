@@ -25,6 +25,9 @@ const ignore = (file: string) => {
   if (file.startsWith("/worker")) {
     return false;
   }
+  if (file.startsWith("/scaffold-wordpress")) {
+    return false;
+  }
   if (file.startsWith("/node_modules/better-sqlite3")) {
     return false;
   }
@@ -52,6 +55,11 @@ const config: ForgeConfig = {
       },
     ],
     icon: "./assets/icon/logo",
+    extraResource: [
+      "./scaffold-wordpress",
+      // WordPress binaries will be downloaded during build
+      // and placed in extraResources/wordpress-runtime/
+    ],
 
     osxSign: isEndToEndTestBuild
       ? undefined

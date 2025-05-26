@@ -15,6 +15,27 @@ import { ImportAppParams, ImportAppResult } from "../ipc_types";
 const logger = log.scope("import-handlers");
 const handle = createLoggedHandler(logger);
 
+// Helper function to detect WordPress project
+async function detectWordPressProject(projectPath: string): Promise<'wordpress' | 'react'> {
+  try {
+    // Check for WordPress indicators
+    const wpConfigExists = await fs.access(path.join(projectPath, 'wp-config.php'))
+      .then(() => true).catch(() => false);
+    const wpContentExists = await fs.access(path.join(projectPath, 'wp-content'))
+      .then(() => true).catch(() => false);
+    const wordpressExists = await fs.access(path.join(projectPath, 'wordpress', 'wp-content'))
+      .then(() => true).catch(() => false);
+    
+    if (wpConfigExists || wpContentExists || wordpressExists) {
+      return 'wordpress';
+    }
+    
+    return 'react';
+  } catch {
+    return 'react';
+  }
+}
+
 export function registerImportHandlers() {
   // Handler for selecting an app folder
   handle("select-app-folder", async () => {
@@ -24,13 +45,14 @@ export function registerImportHandlers() {
     });
 
     if (result.canceled) {
-      return { path: null, name: null };
+      return { path: null, name: null, appType: null };
     }
 
     const selectedPath = result.filePaths[0];
     const folderName = path.basename(selectedPath);
+    const appType = await detectWordPressProject(selectedPath);
 
-    return { path: selectedPath, name: folderName };
+    return { path: selectedPath, name: folderName, appType };
   });
 
   // Handler for checking if AI_RULES.md exists
@@ -67,7 +89,7 @@ export function registerImportHandlers() {
     "import-app",
     async (
       _,
-      { path: sourcePath, appName }: ImportAppParams,
+      { path: sourcePath, appName, appType }: ImportAppParams & { appType?: 'react' | 'wordpress' },
     ): Promise<ImportAppResult> => {
       // Validate the source path exists
       try {
@@ -88,11 +110,31 @@ export function registerImportHandlers() {
           throw error;
         }
       }
+
+      // Detect app type if not provided
+      const detectedAppType = appType || await detectWordPressProject(sourcePath);
+
       // Copy the app folder to the Dyad apps directory, excluding node_modules
       await fs.cp(sourcePath, destPath, {
         recursive: true,
         filter: (source) => !source.includes("node_modules"),
       });
+
+      // For WordPress projects, ensure AI_RULES.md exists
+      if (detectedAppType === 'wordpress') {
+        const aiRulesPath = path.join(destPath, 'AI_RULES.md');
+        const aiRulesExists = await fs.access(aiRulesPath).then(() => true).catch(() => false);
+        
+        if (!aiRulesExists) {
+          // Copy WordPress AI_RULES.md from scaffold
+          const scaffoldAiRulesPath = path.join(__dirname, '../../../scaffold-wordpress/AI_RULES.md');
+          try {
+            await fs.copyFile(scaffoldAiRulesPath, aiRulesPath);
+          } catch (err) {
+            logger.warn('Could not copy WordPress AI_RULES.md from scaffold:', err);
+          }
+        }
+      }
 
       const isGitRepo = await fs
         .access(path.join(destPath, ".git"))
@@ -129,6 +171,7 @@ export function registerImportHandlers() {
           name: appName,
           // Use the name as the path for now
           path: appName,
+          appType: detectedAppType,
         })
         .returning();
 

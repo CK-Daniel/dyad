@@ -15,6 +15,10 @@ export const apps = sqliteTable("apps", {
   githubOrg: text("github_org"),
   githubRepo: text("github_repo"),
   supabaseProjectId: text("supabase_project_id"),
+  // WordPress support fields
+  appType: text("app_type", { enum: ["react", "wordpress"] }).default("react"),
+  mysqlPort: integer("mysql_port"),
+  phpPort: integer("php_port"),
 });
 
 export const chats = sqliteTable("chats", {

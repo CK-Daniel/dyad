@@ -1,5 +1,45 @@
 import net from "net";
 
+export async function getAvailablePort(defaultPort: number): Promise<number> {
+  try {
+    // First try the default port
+    const isAvailable = await checkPortAvailable(defaultPort);
+    if (isAvailable) {
+      return defaultPort;
+    }
+    // If not available, find a random port
+    return findAvailablePort(defaultPort, defaultPort + 1000);
+  } catch {
+    return findAvailablePort(defaultPort, defaultPort + 1000);
+  }
+}
+
+export async function checkPortInUse(port: number): Promise<boolean> {
+  return !(await checkPortAvailable(port));
+}
+
+function checkPortAvailable(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const server = net.createServer();
+    
+    server.once('error', (err: any) => {
+      if (err.code === 'EADDRINUSE') {
+        resolve(false);
+      } else {
+        resolve(true);
+      }
+    });
+    
+    server.once('listening', () => {
+      server.close(() => {
+        resolve(true);
+      });
+    });
+    
+    server.listen(port, 'localhost');
+  });
+}
+
 export function findAvailablePort(
   minPort: number,
   maxPort: number,

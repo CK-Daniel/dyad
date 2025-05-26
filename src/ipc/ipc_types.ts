@@ -69,6 +69,9 @@ export interface App {
   githubRepo: string | null;
   supabaseProjectId: string | null;
   supabaseProjectName: string | null;
+  appType?: 'react' | 'wordpress';
+  phpPort?: number | null;
+  mysqlPort?: number | null;
 }
 
 export interface Version {
@@ -195,6 +198,7 @@ export interface ApproveProposalResult {
 export interface ImportAppParams {
   path: string;
   appName: string;
+  appType?: 'react' | 'wordpress';
 }
 
 export interface ImportAppResult {

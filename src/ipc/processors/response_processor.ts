@@ -99,6 +99,32 @@ export function getDyadAddDependencyTags(fullResponse: string): string[] {
   return packages;
 }
 
+export function getDyadWpCliTags(fullResponse: string): string[] {
+  const dyadWpCliRegex = /<dyad-wp-cli>([\s\S]*?)<\/dyad-wp-cli>/gi;
+  let match;
+  const commands: string[] = [];
+  while ((match = dyadWpCliRegex.exec(fullResponse)) !== null) {
+    const command = match[1].trim();
+    if (command) {
+      commands.push(command);
+    }
+  }
+  return commands;
+}
+
+export function getDyadWpDbTags(fullResponse: string): string[] {
+  const dyadWpDbRegex = /<dyad-wp-db>([\s\S]*?)<\/dyad-wp-db>/gi;
+  let match;
+  const queries: string[] = [];
+  while ((match = dyadWpDbRegex.exec(fullResponse)) !== null) {
+    const query = match[1].trim();
+    if (query) {
+      queries.push(query);
+    }
+  }
+  return queries;
+}
+
 export function getDyadChatSummaryTag(fullResponse: string): string | null {
   const dyadChatSummaryRegex =
     /<dyad-chat-summary>([\s\S]*?)<\/dyad-chat-summary>/g;
@@ -211,6 +237,14 @@ export async function processFullResponseActions(
     const dyadAddDependencyPackages = getDyadAddDependencyTags(fullResponse);
     const dyadExecuteSqlQueries = chatWithApp.app.supabaseProjectId
       ? getDyadExecuteSqlTags(fullResponse)
+      : [];
+    
+    // WordPress-specific tags
+    const dyadWpCliCommands = chatWithApp.app.appType === 'wordpress'
+      ? getDyadWpCliTags(fullResponse)
+      : [];
+    const dyadWpDbQueries = chatWithApp.app.appType === 'wordpress'
+      ? getDyadWpDbTags(fullResponse)
       : [];
 
     const message = await db.query.messages.findFirst({
@@ -407,13 +441,59 @@ export async function processFullResponseActions(
       }
     }
 
+    // Process WordPress WP-CLI commands
+    if (chatWithApp.app.appType === 'wordpress' && dyadWpCliCommands.length > 0) {
+      const { IpcClient } = await import('../../ipc/ipc_client');
+      const client = IpcClient.getInstance();
+      
+      for (const command of dyadWpCliCommands) {
+        try {
+          logger.log(`Executing WP-CLI command: ${command}`);
+          const result = await client.wordpressWpCli({
+            appId: chatWithApp.app.id,
+            command: command
+          });
+          logger.log(`WP-CLI command executed successfully: ${command}`);
+        } catch (error) {
+          errors.push({
+            message: `Failed to execute WP-CLI command: ${command}`,
+            error: error,
+          });
+        }
+      }
+    }
+    
+    // Process WordPress database queries
+    if (chatWithApp.app.appType === 'wordpress' && dyadWpDbQueries.length > 0) {
+      const { IpcClient } = await import('../../ipc/ipc_client');
+      const client = IpcClient.getInstance();
+      
+      for (const query of dyadWpDbQueries) {
+        try {
+          logger.log(`Executing WordPress DB query: ${query}`);
+          const result = await client.wordpressMysqlQuery({
+            appId: chatWithApp.app.id,
+            query: query
+          });
+          logger.log(`WordPress DB query executed successfully`);
+        } catch (error) {
+          errors.push({
+            message: `Failed to execute WordPress DB query: ${query}`,
+            error: error,
+          });
+        }
+      }
+    }
+
     // If we have any file changes, commit them all at once
     hasChanges =
       writtenFiles.length > 0 ||
       renamedFiles.length > 0 ||
       deletedFiles.length > 0 ||
       dyadAddDependencyPackages.length > 0 ||
-      dyadExecuteSqlQueries.length > 0;
+      dyadExecuteSqlQueries.length > 0 ||
+      dyadWpCliCommands.length > 0 ||
+      dyadWpDbQueries.length > 0;
 
     let uncommittedFiles: string[] = [];
     let extraFilesError: string | undefined;
@@ -442,6 +522,10 @@ export async function processFullResponseActions(
         );
       if (dyadExecuteSqlQueries.length > 0)
         changes.push(`executed ${dyadExecuteSqlQueries.length} SQL queries`);
+      if (dyadWpCliCommands.length > 0)
+        changes.push(`executed ${dyadWpCliCommands.length} WP-CLI command(s)`);
+      if (dyadWpDbQueries.length > 0)
+        changes.push(`executed ${dyadWpDbQueries.length} WordPress DB query(ies)`);
 
       let message = chatSummary
         ? `[dyad] ${chatSummary} - ${changes.join(", ")}`

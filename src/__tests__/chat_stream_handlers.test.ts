@@ -19,7 +19,21 @@ vi.mock("node:fs", async () => {
       existsSync: vi.fn(),
       renameSync: vi.fn(),
       unlinkSync: vi.fn(),
+      lstatSync: vi.fn(() => ({ isDirectory: () => false })),
+      rmdirSync: vi.fn(),
+      promises: {
+        readFile: vi.fn(),
+        writeFile: vi.fn(),
+        mkdir: vi.fn(),
+        access: vi.fn(),
+      }
     },
+    promises: {
+      readFile: vi.fn(),
+      writeFile: vi.fn(),
+      mkdir: vi.fn(),
+      access: vi.fn(),
+    }
   };
 });
 
@@ -29,7 +43,26 @@ vi.mock("isomorphic-git", () => ({
     add: vi.fn().mockResolvedValue(undefined),
     remove: vi.fn().mockResolvedValue(undefined),
     commit: vi.fn().mockResolvedValue(undefined),
+    statusMatrix: vi.fn().mockResolvedValue([]),
   },
+}));
+
+// Mock electron-log
+vi.mock("electron-log", () => ({
+  default: {
+    scope: () => ({
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      log: vi.fn()
+    })
+  }
+}));
+
+// Mock git author
+vi.mock("../ipc/utils/git_author", () => ({
+  getGitAuthor: vi.fn().mockResolvedValue({ name: "Test User", email: "test@example.com" })
 }));
 
 // Mock paths module to control getDyadAppPath
@@ -46,8 +79,33 @@ vi.mock("../db", () => ({
       chats: {
         findFirst: vi.fn(),
       },
+      messages: {
+        findFirst: vi.fn(),
+      }
     },
+    update: vi.fn(() => ({
+      set: vi.fn(() => ({
+        where: vi.fn(() => Promise.resolve([]))
+      }))
+    }))
   },
+}));
+
+// Mock Supabase functions
+vi.mock("../../supabase_admin/supabase_management_client", () => ({
+  deleteSupabaseFunction: vi.fn(),
+  deploySupabaseFunctions: vi.fn(),
+  executeSupabaseSql: vi.fn(),
+}));
+
+// Mock Supabase utils
+vi.mock("../../supabase_admin/supabase_utils", () => ({
+  isServerFunction: vi.fn(() => false),
+}));
+
+// Mock execute add dependency
+vi.mock("./executeAddDependency", () => ({
+  executeAddDependency: vi.fn().mockResolvedValue({ success: true }),
 }));
 
 describe("getDyadAddDependencyTags", () => {

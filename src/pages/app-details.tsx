@@ -11,6 +11,8 @@ import {
   MessageCircle,
   Pencil,
   Folder,
+  Globe,
+  Code,
 } from "lucide-react";
 import {
   Popover,
@@ -28,6 +30,7 @@ import {
 } from "@/components/ui/dialog";
 import { GitHubConnector } from "@/components/GitHubConnector";
 import { SupabaseConnector } from "@/components/SupabaseConnector";
+import { WordPressToolbar } from "@/components/WordPressToolbar";
 import { showError } from "@/lib/toast";
 
 export default function AppDetailsPage() {
@@ -174,15 +177,22 @@ export default function AppDetailsPage() {
 
       <div className="w-full max-w-2xl mx-auto mt-10 p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm relative">
         <div className="flex items-center mb-3">
-          <h2 className="text-2xl font-bold">{selectedApp.name}</h2>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="ml-1 p-0.5 h-auto"
-            onClick={handleOpenRenameDialog}
-          >
-            <Pencil className="h-3.5 w-3.5" />
-          </Button>
+          <div className="flex items-center gap-2 flex-1">
+            {selectedApp.appType === 'wordpress' ? (
+              <Globe className="h-5 w-5 text-blue-500" />
+            ) : (
+              <Code className="h-5 w-5 text-green-500" />
+            )}
+            <h2 className="text-2xl font-bold">{selectedApp.name}</h2>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="ml-1 p-0.5 h-auto"
+              onClick={handleOpenRenameDialog}
+            >
+              <Pencil className="h-3.5 w-3.5" />
+            </Button>
+          </div>
         </div>
 
         {/* Overflow Menu in top right */}
@@ -249,6 +259,14 @@ export default function AppDetailsPage() {
             </div>
           </div>
         </div>
+        
+        {/* WordPress Toolbar for WordPress apps */}
+        {selectedApp.appType === 'wordpress' && (
+          <div className="mb-4 pb-4 border-b">
+            <WordPressToolbar app={selectedApp} onRefresh={refreshApps} />
+          </div>
+        )}
+        
         <div className="mt-4 flex flex-col gap-2">
           <Button
             onClick={() => {
@@ -265,7 +283,7 @@ export default function AppDetailsPage() {
             <MessageCircle className="h-4 w-4" />
           </Button>
           <GitHubConnector appId={appId} folderName={selectedApp.path} />
-          {appId && <SupabaseConnector appId={appId} />}
+          {appId && selectedApp.appType !== 'wordpress' && <SupabaseConnector appId={appId} />}
         </div>
 
         {/* Rename Dialog */}

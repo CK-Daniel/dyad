@@ -798,6 +798,7 @@ export class IpcClient {
   public async selectAppFolder(): Promise<{
     path: string | null;
     name: string | null;
+    appType?: 'react' | 'wordpress' | null;
   }> {
     return this.ipcRenderer.invoke("select-app-folder");
   }
@@ -824,5 +825,59 @@ export class IpcClient {
 
   async clearSessionData(): Promise<void> {
     return this.ipcRenderer.invoke("clear-session-data");
+  }
+
+  // WordPress-specific methods
+  public async wordpressStart(params: { appId: number }): Promise<{
+    phpPort: number;
+    mysqlPort: number;
+  }> {
+    return this.ipcRenderer.invoke("wordpress:start", params);
+  }
+
+  public async wordpressStop(params: { appId: number }): Promise<{
+    success: boolean;
+  }> {
+    return this.ipcRenderer.invoke("wordpress:stop", params);
+  }
+
+  public async wordpressStatus(params: { appId: number }): Promise<{
+    running: boolean;
+    phpPort?: number | null;
+    mysqlPort?: number | null;
+  }> {
+    return this.ipcRenderer.invoke("wordpress:status", params);
+  }
+
+  public async wordpressWpCli(params: {
+    appId: number;
+    command: string;
+  }): Promise<{ success: boolean; output: string }> {
+    return this.ipcRenderer.invoke("wordpress:wp-cli", params);
+  }
+
+  public async wordpressMysqlQuery(params: {
+    appId: number;
+    query: string;
+  }): Promise<{ success: boolean; output: string }> {
+    return this.ipcRenderer.invoke("wordpress:mysql-query", params);
+  }
+
+  public async wordpressInstall(params: {
+    appId: number;
+    siteTitle: string;
+    adminUser: string;
+    adminPassword: string;
+    adminEmail: string;
+  }): Promise<{ success: boolean; output: string }> {
+    return this.ipcRenderer.invoke("wordpress:install", params);
+  }
+
+  public async wordpressCheckBinaries(): Promise<{
+    available: boolean;
+    php: boolean;
+    mysql: boolean;
+  }> {
+    return this.ipcRenderer.invoke("wordpress:check-binaries");
   }
 }

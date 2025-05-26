@@ -1,6 +1,6 @@
 import { useNavigate } from "@tanstack/react-router";
 import { formatDistanceToNow } from "date-fns";
-import { PlusCircle } from "lucide-react";
+import { PlusCircle, Globe, Code } from "lucide-react";
 import { useAtom, useSetAtom } from "jotai";
 import { selectedAppIdAtom } from "@/atoms/appAtoms";
 import {
@@ -75,13 +75,22 @@ export function AppList({ show }: { show?: boolean }) {
                         : ""
                     }`}
                   >
-                    <div className="flex flex-col w-full">
-                      <span className="truncate">{app.name}</span>
-                      <span className="text-xs text-gray-500">
-                        {formatDistanceToNow(new Date(app.createdAt), {
-                          addSuffix: true,
-                        })}
-                      </span>
+                    <div className="flex items-center w-full gap-2">
+                      <div className="flex-shrink-0">
+                        {app.appType === 'wordpress' ? (
+                          <Globe className="h-4 w-4 text-blue-500" />
+                        ) : (
+                          <Code className="h-4 w-4 text-green-500" />
+                        )}
+                      </div>
+                      <div className="flex flex-col flex-1 min-w-0">
+                        <span className="truncate">{app.name}</span>
+                        <span className="text-xs text-gray-500">
+                          {formatDistanceToNow(new Date(app.createdAt), {
+                            addSuffix: true,
+                          })}
+                        </span>
+                      </div>
                     </div>
                   </Button>
                 </SidebarMenuItem>
