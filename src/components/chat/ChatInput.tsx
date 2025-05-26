@@ -295,7 +295,7 @@ export function ChatInput({ chatId }: { chatId?: number }) {
               ref={textareaRef}
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
-              onKeyPress={handleKeyPress}
+              onKeyDown={handleKeyPress}
               placeholder="Ask Dyad to build..."
               className="flex-1 p-2 focus:outline-none overflow-y-auto min-h-[40px] max-h-[200px]"
               style={{ resize: "none" }}
@@ -578,7 +578,11 @@ function ActionProposalActions({ proposal }: { proposal: ActionProposal }) {
   return (
     <div className="border-b border-border p-2 pb-0 flex items-center justify-between">
       <div className="flex items-center space-x-2 overflow-x-auto pb-2">
-        {proposal.actions.map((action) => mapActionToButton(action))}
+        {proposal.actions.map((action, index) => (
+          <div key={index}>
+            {mapActionToButton(action)}
+          </div>
+        ))}
       </div>
     </div>
   );

@@ -291,6 +291,58 @@ export function registerWordPressHandlers() {
   // Check WordPress binary availability
   handle('wordpress:check-binaries', async () => {
     try {
+      const { app } = require('electron');
+      
+      // For development mode, check if system binaries are available
+      if (!app.isPackaged) {
+        try {
+          const which = require('which');
+          let phpExists = false;
+          let mysqlExists = false;
+          
+          try {
+            which.sync('php');
+            phpExists = true;
+            logger.debug('Found system PHP');
+          } catch {
+            logger.debug('System PHP not found');
+          }
+          
+          // Check for MySQL daemon in various forms
+          try {
+            which.sync('mysqld');
+            mysqlExists = true;
+            logger.debug('Found system mysqld');
+          } catch {
+            try {
+              which.sync('mysql.server');
+              mysqlExists = true;
+              logger.debug('Found system mysql.server');
+            } catch {
+              try {
+                which.sync('mysql');
+                mysqlExists = true;
+                logger.debug('Found system mysql client (will use for server)');
+              } catch {
+                logger.debug('No MySQL binary found');
+              }
+            }
+          }
+          
+          if (phpExists && mysqlExists) {
+            return {
+              available: true,
+              php: true,
+              mysql: true
+            };
+          }
+          
+          logger.warn('Some system binaries missing, checking bundled versions');
+        } catch (error) {
+          logger.warn('Error checking system binaries:', error);
+        }
+      }
+      
       const phpPath = getWordPressBinaryPath('php');
       const mysqlPath = getWordPressBinaryPath('mysqld');
       

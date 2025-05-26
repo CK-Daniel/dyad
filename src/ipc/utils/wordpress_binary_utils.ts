@@ -65,7 +65,7 @@ export function getWordPressBinaryPath(binary: WordPressBinary): string {
     : path.join(__dirname, '../../../');
   
   // Handle different binary names across platforms
-  let binaryName = binary;
+  let binaryName: string = binary;
   if (platformName === 'win32') {
     if (binary === 'mysql' || binary === 'mysqld' || binary === 'php') {
       binaryName = `${binary}.exe`;
@@ -101,6 +101,66 @@ export async function checkWordPressBinaries(): Promise<{
   const binaries: WordPressBinary[] = ['php', 'mysqld'];
   const missing: string[] = [];
   
+  // In development, check system binaries first
+  if (!app.isPackaged) {
+    try {
+      const which = require('which');
+      
+      for (const binary of binaries) {
+        let found = false;
+        
+        if (binary === 'php') {
+          try {
+            const phpPath = which.sync('php');
+            logger.debug(`Found system PHP at ${phpPath}`);
+            found = true;
+          } catch {
+            logger.debug('System PHP not found');
+          }
+        } else if (binary === 'mysqld') {
+          // Check for MySQL in various forms
+          try {
+            const mysqlPath = which.sync('mysqld');
+            logger.debug(`Found system mysqld at ${mysqlPath}`);
+            found = true;
+          } catch {
+            try {
+              const mysqlPath = which.sync('mysql.server');
+              logger.debug(`Found system mysql.server at ${mysqlPath}`);
+              found = true;
+            } catch {
+              try {
+                const mysqlPath = which.sync('mysql');
+                logger.debug(`Found system mysql at ${mysqlPath}`);
+                found = true;
+              } catch {
+                logger.debug('No MySQL binary found');
+              }
+            }
+          }
+        }
+        
+        if (!found) {
+          missing.push(binary);
+        }
+      }
+      
+      // If we found system binaries, return success
+      if (missing.length === 0) {
+        return {
+          available: true,
+          missing: []
+        };
+      }
+      
+      logger.warn('Some system binaries missing, checking bundled versions');
+      missing.length = 0; // Reset for bundled check
+    } catch (error) {
+      logger.warn('Error checking system binaries:', error);
+    }
+  }
+  
+  // Check bundled binaries
   for (const binary of binaries) {
     const binaryPath = getWordPressBinaryPath(binary);
     try {

@@ -658,7 +658,14 @@ export function registerAppHandlers() {
           const appInfo = runningApps.get(appId)!;
           try {
             logger.log(`Stopping app ${appId} before deletion.`); // Adjusted log
-            await killProcess(appInfo.process);
+            
+            // Check if it's a WordPress app and stop it properly
+            if (app.appType === 'wordpress') {
+              await wordpressRuntime.stop(appId.toString());
+            } else {
+              await killProcess(appInfo.process);
+            }
+            
             runningApps.delete(appId);
           } catch (error: any) {
             logger.error(`Error stopping app ${appId} before deletion:`, error); // Adjusted log
@@ -830,6 +837,15 @@ export function registerAppHandlers() {
     logger.log("start: resetting all apps and settings.");
     // Stop all running apps first
     logger.log("stopping all running apps...");
+    
+    // Stop all WordPress runtime instances
+    try {
+      await wordpressRuntime.stopAll();
+      logger.log("all WordPress runtime instances stopped.");
+    } catch (error) {
+      logger.error("Error stopping WordPress runtime instances:", error);
+    }
+    
     const runningAppIds = Array.from(runningApps.keys());
     for (const appId of runningAppIds) {
       try {

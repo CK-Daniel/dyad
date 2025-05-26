@@ -16,6 +16,8 @@ import {
 } from "../../supabase_admin/supabase_management_client";
 import { isServerFunction } from "../../supabase_admin/supabase_utils";
 import { SqlQuery } from "../../lib/schemas";
+import { spawn } from "child_process";
+import { getWordPressBinaryPath } from "../utils/wordpress_binary_utils";
 
 const readFile = fs.promises.readFile;
 const logger = log.scope("response_processor");
@@ -443,17 +445,45 @@ export async function processFullResponseActions(
 
     // Process WordPress WP-CLI commands
     if (chatWithApp.app.appType === 'wordpress' && dyadWpCliCommands.length > 0) {
-      const { IpcClient } = await import('../../ipc/ipc_client');
-      const client = IpcClient.getInstance();
-      
       for (const command of dyadWpCliCommands) {
         try {
           logger.log(`Executing WP-CLI command: ${command}`);
-          const result = await client.wordpressWpCli({
-            appId: chatWithApp.app.id,
-            command: command
+          
+          // Execute WP-CLI command directly
+          const wpCliPath = getWordPressBinaryPath('wp-cli');
+          const wordpressDir = path.join(appPath, 'wordpress');
+          
+          await new Promise<void>((resolve, reject) => {
+            const child = spawn(wpCliPath, command.split(' '), {
+              cwd: wordpressDir,
+              stdio: 'pipe'
+            });
+            
+            let _output = '';
+            let errorOutput = '';
+            
+            child.stdout?.on('data', (data) => {
+              _output += data.toString();
+            });
+            
+            child.stderr?.on('data', (data) => {
+              errorOutput += data.toString();
+            });
+            
+            child.on('close', (code) => {
+              if (code === 0) {
+                logger.log(`WP-CLI command executed successfully: ${command}`);
+                resolve();
+              } else {
+                reject(new Error(`WP-CLI command failed with code ${code}: ${errorOutput}`));
+              }
+            });
+            
+            child.on('error', (error) => {
+              reject(error);
+            });
           });
-          logger.log(`WP-CLI command executed successfully: ${command}`);
+          
         } catch (error) {
           errors.push({
             message: `Failed to execute WP-CLI command: ${command}`,
@@ -465,17 +495,49 @@ export async function processFullResponseActions(
     
     // Process WordPress database queries
     if (chatWithApp.app.appType === 'wordpress' && dyadWpDbQueries.length > 0) {
-      const { IpcClient } = await import('../../ipc/ipc_client');
-      const client = IpcClient.getInstance();
-      
       for (const query of dyadWpDbQueries) {
         try {
           logger.log(`Executing WordPress DB query: ${query}`);
-          const result = await client.wordpressMysqlQuery({
-            appId: chatWithApp.app.id,
-            query: query
+          
+          // Execute MySQL query directly
+          const mysqlPath = getWordPressBinaryPath('mysql');
+          
+          await new Promise<void>((resolve, reject) => {
+            const child = spawn(mysqlPath, [
+              '-h', 'localhost',
+              '-P', chatWithApp.app.mysqlPort?.toString() || '3306',
+              '-u', 'root',
+              '-e', query,
+              'wordpress'
+            ], {
+              stdio: 'pipe'
+            });
+            
+            let _output = '';
+            let errorOutput = '';
+            
+            child.stdout?.on('data', (data) => {
+              _output += data.toString();
+            });
+            
+            child.stderr?.on('data', (data) => {
+              errorOutput += data.toString();
+            });
+            
+            child.on('close', (code) => {
+              if (code === 0) {
+                logger.log(`WordPress DB query executed successfully`);
+                resolve();
+              } else {
+                reject(new Error(`MySQL query failed with code ${code}: ${errorOutput}`));
+              }
+            });
+            
+            child.on('error', (error) => {
+              reject(error);
+            });
           });
-          logger.log(`WordPress DB query executed successfully`);
+          
         } catch (error) {
           errors.push({
             message: `Failed to execute WordPress DB query: ${query}`,

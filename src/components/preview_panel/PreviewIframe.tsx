@@ -3,6 +3,7 @@ import {
   appUrlAtom,
   appOutputAtom,
   previewErrorMessageAtom,
+  currentAppAtom,
 } from "@/atoms/appAtoms";
 import { useAtomValue, useSetAtom, useAtom } from "jotai";
 import { useEffect, useRef, useState } from "react";
@@ -118,9 +119,11 @@ export const PreviewIframe = ({ loading }: { loading: boolean }) => {
     Array<{ path: string; label: string }>
   >([]);
 
-  // Load router related files to extract routes
+  const currentApp = useAtomValue(currentAppAtom);
+  
+  // Load router related files to extract routes - only for React apps
   const { content: routerContent } = useLoadAppFile(
-    selectedAppId,
+    selectedAppId && currentApp?.appType === 'react' ? selectedAppId : null,
     "src/App.tsx",
   );
 
