@@ -150,13 +150,30 @@ export class WordPressRuntime {
     const mysqldPath = getWordPressBinaryPath('mysqld');
     const dataDir = getMySQLDataDir(appPath);
     
-    // Run mysql_install_db or equivalent initialization
-    const initProcess = spawn(mysqldPath, [
+    // Detect MySQL version to determine appropriate initialization parameters
+    const mysqlVersion = await this.detectMySQLVersion();
+    
+    // Build initialization arguments based on version
+    const initArgs = [
       '--initialize-insecure',
       `--datadir=${dataDir}`,
       '--explicit_defaults_for_timestamp',
       '--log-error-verbosity=3'
-    ], {
+    ];
+    
+    // Add version-specific initialization parameters
+    if (mysqlVersion) {
+      if (mysqlVersion.major === 8 && mysqlVersion.minor === 0) {
+        // MySQL 8.0.x can use default-authentication-plugin during initialization
+        initArgs.push('--default-authentication-plugin=mysql_native_password');
+      } else if (mysqlVersion.major >= 9 || (mysqlVersion.major === 8 && mysqlVersion.minor > 0)) {
+        // MySQL 8.1+ and 9.x: avoid deprecated options
+        logger.info(`MySQL ${mysqlVersion.major}.${mysqlVersion.minor} detected - using modern initialization`);
+      }
+    }
+    
+    // Run mysql_install_db or equivalent initialization
+    const initProcess = spawn(mysqldPath, initArgs, {
       cwd: appPath,
       env: { ...process.env },
       stdio: ['ignore', 'pipe', 'pipe']
@@ -202,6 +219,63 @@ export class WordPressRuntime {
   }
 
   /**
+   * Detect MySQL version
+   */
+  private async detectMySQLVersion(): Promise<{ major: number; minor: number; patch: number } | null> {
+    const mysqldPath = getWordPressBinaryPath('mysqld');
+    
+    try {
+      const versionProcess = spawn(mysqldPath, ['--version'], {
+        stdio: ['ignore', 'pipe', 'pipe']
+      });
+
+      const output = await new Promise<string>((resolve, reject) => {
+        let stdout = '';
+        let stderr = '';
+        
+        versionProcess.stdout?.on('data', (data) => {
+          stdout += data.toString();
+        });
+        
+        versionProcess.stderr?.on('data', (data) => {
+          stderr += data.toString();
+        });
+        
+        versionProcess.on('close', (code) => {
+          if (code === 0) {
+            resolve(stdout);
+          } else {
+            reject(new Error(`Failed to get MySQL version: ${stderr}`));
+          }
+        });
+        
+        versionProcess.on('error', (error) => {
+          reject(error);
+        });
+      });
+
+      // Parse version from output like "mysqld  Ver 8.0.33 for Linux on x86_64 (MySQL Community Server - GPL)"
+      const versionMatch = output.match(/Ver\s+(\d+)\.(\d+)\.(\d+)/);
+      if (versionMatch) {
+        const [, major, minor, patch] = versionMatch;
+        const version = {
+          major: parseInt(major, 10),
+          minor: parseInt(minor, 10),
+          patch: parseInt(patch, 10)
+        };
+        logger.info(`Detected MySQL version: ${major}.${minor}.${patch}`);
+        return version;
+      }
+      
+      logger.warn('Could not parse MySQL version from output:', output);
+      return null;
+    } catch (error) {
+      logger.error('Error detecting MySQL version:', error);
+      return null;
+    }
+  }
+
+  /**
    * Start MySQL server
    */
   private async startMySQL(appPath: string, port: number): Promise<ChildProcess> {
@@ -210,15 +284,40 @@ export class WordPressRuntime {
     
     logger.info(`Starting MySQL on port ${port}...`);
     
-    const mysql = spawn(mysqldPath, [
+    // Detect MySQL version to determine appropriate parameters
+    const mysqlVersion = await this.detectMySQLVersion();
+    
+    // Build MySQL arguments based on version
+    const mysqlArgs = [
       `--datadir=${dataDir}`,
       `--port=${port}`,
       '--bind-address=127.0.0.1',
       '--skip-networking=0',
-      '--default-authentication-plugin=mysql_native_password',
       '--console',
       '--log-error-verbosity=3'
-    ], {
+    ];
+    
+    // Add version-specific parameters
+    if (mysqlVersion) {
+      // MySQL 8.0 introduced changes to authentication
+      if (mysqlVersion.major === 8 && mysqlVersion.minor === 0) {
+        // For MySQL 8.0.x, we can use default-authentication-plugin
+        mysqlArgs.push('--default-authentication-plugin=mysql_native_password');
+      } else if (mysqlVersion.major > 8 || (mysqlVersion.major === 8 && mysqlVersion.minor > 0)) {
+        // For MySQL 8.1+ and 9.x, default-authentication-plugin is deprecated
+        // Use authentication-policy instead if needed
+        // Note: We'll handle authentication via ALTER USER command after startup
+        logger.info(`MySQL ${mysqlVersion.major}.${mysqlVersion.minor} detected - using modern authentication handling`);
+      } else if (mysqlVersion.major < 8) {
+        // MySQL 5.7 and earlier - no special authentication handling needed
+        logger.info(`MySQL ${mysqlVersion.major}.${mysqlVersion.minor} detected - using legacy configuration`);
+      }
+    } else {
+      // If we couldn't detect version, assume modern MySQL and avoid deprecated options
+      logger.warn('Could not detect MySQL version - using safe defaults');
+    }
+    
+    const mysql = spawn(mysqldPath, mysqlArgs, {
       cwd: appPath,
       env: { ...process.env },
       detached: false,
@@ -331,6 +430,7 @@ export class WordPressRuntime {
   private async createWordPressDatabase(port: number): Promise<void> {
     const mysqlPath = getWordPressBinaryPath('mysql');
     
+    // First, create the database
     const createDbProcess = spawn(mysqlPath, [
       '-h', '127.0.0.1',
       '-P', port.toString(),
@@ -348,6 +448,78 @@ export class WordPressRuntime {
     }
 
     logger.info('WordPress database created successfully');
+    
+    // Detect MySQL version to determine if authentication adjustment is needed
+    const mysqlVersion = await this.detectMySQLVersion();
+    
+    // For MySQL 8.0+ and 9.x, ensure root user uses mysql_native_password
+    // This is needed for WordPress compatibility
+    if (mysqlVersion && mysqlVersion.major >= 8) {
+      try {
+        // For MySQL 8.x and 9.x, we need to handle authentication properly
+        // First try to alter the user with the appropriate syntax
+        let alterUserQuery: string;
+        
+        if (mysqlVersion.major === 8 && mysqlVersion.minor === 0) {
+          // MySQL 8.0.x syntax
+          alterUserQuery = "ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY ''; FLUSH PRIVILEGES;";
+        } else {
+          // MySQL 8.1+ and 9.x might require different handling
+          // Try the standard ALTER USER command first
+          alterUserQuery = "ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY ''; FLUSH PRIVILEGES;";
+        }
+        
+        const alterUserProcess = spawn(mysqlPath, [
+          '-h', '127.0.0.1',
+          '-P', port.toString(),
+          '-u', 'root',
+          '-e', alterUserQuery
+        ]);
+
+        const alterExitCode = await new Promise<number>((resolve, reject) => {
+          alterUserProcess.on('close', resolve);
+          alterUserProcess.on('error', reject);
+        });
+
+        if (alterExitCode === 0) {
+          logger.info(`MySQL ${mysqlVersion.major}.${mysqlVersion.minor} root user authentication method updated for WordPress compatibility`);
+        } else {
+          // If the first attempt failed, try alternative approach for newer versions
+          if (mysqlVersion.major > 8 || (mysqlVersion.major === 8 && mysqlVersion.minor > 0)) {
+            logger.info('Trying alternative authentication setup for newer MySQL version');
+            
+            // For very new versions, the plugin might not exist or syntax might be different
+            // Try creating a new user specifically for WordPress if root user modification fails
+            const createWpUserProcess = spawn(mysqlPath, [
+              '-h', '127.0.0.1',
+              '-P', port.toString(),
+              '-u', 'root',
+              '-e', "CREATE USER IF NOT EXISTS 'wordpress'@'localhost' IDENTIFIED WITH mysql_native_password BY ''; GRANT ALL PRIVILEGES ON wordpress.* TO 'wordpress'@'localhost'; FLUSH PRIVILEGES;"
+            ]);
+
+            const wpUserExitCode = await new Promise<number>((resolve, reject) => {
+              createWpUserProcess.on('close', resolve);
+              createWpUserProcess.on('error', reject);
+            });
+
+            if (wpUserExitCode === 0) {
+              logger.info('Created dedicated WordPress user with mysql_native_password authentication');
+            } else {
+              logger.warn('Failed to create WordPress user, continuing with root user');
+            }
+          } else {
+            logger.warn('Failed to update MySQL root user authentication method, continuing anyway');
+          }
+        }
+      } catch (error) {
+        logger.warn('Error updating MySQL authentication:', error);
+        // Continue anyway as WordPress might still work with default authentication
+      }
+    } else if (!mysqlVersion) {
+      logger.info('MySQL version unknown - skipping authentication adjustments');
+    } else {
+      logger.info(`MySQL ${mysqlVersion.major}.${mysqlVersion.minor} detected - no authentication adjustments needed`);
+    }
   }
 
   /**
