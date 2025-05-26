@@ -12,6 +12,41 @@ const logger = log.scope('wordpress-binary-utils');
 export type WordPressBinary = 'php' | 'mysql' | 'mysqld' | 'wp-cli';
 
 /**
+ * Get the path to a portable binary installation (Windows only)
+ */
+function getPortableBinaryPath(binary: WordPressBinary): string | null {
+  if (platform() !== 'win32') {
+    return null;
+  }
+  
+  const userDir = app.getPath('userData');
+  
+  switch (binary) {
+    case 'php':
+      return path.join(userDir, 'portable', 'php', 'php.exe');
+    case 'mysql':
+    case 'mysqld':
+      // Look for MySQL in portable directory
+      const mysqlDir = path.join(userDir, 'portable', 'mysql');
+      try {
+        const contents = require('fs').readdirSync(mysqlDir);
+        const mysqlSubDir = contents.find((item: string) => item.startsWith('mysql-'));
+        if (mysqlSubDir) {
+          const binPath = binary === 'mysql' ? 'mysql.exe' : 'mysqld.exe';
+          return path.join(mysqlDir, mysqlSubDir, 'bin', binPath);
+        }
+      } catch {
+        // Directory doesn't exist
+      }
+      return null;
+    case 'wp-cli':
+      return path.join(userDir, 'portable', 'wp-cli', 'wp.bat');
+    default:
+      return null;
+  }
+}
+
+/**
  * Get the path to a WordPress binary based on the current platform and architecture
  */
 export function getWordPressBinaryPath(binary: WordPressBinary): string {
@@ -31,7 +66,16 @@ export function getWordPressBinaryPath(binary: WordPressBinary): string {
     
     const systemBinary = systemBinaries[binary];
     
-    // For wp-cli, check the downloaded version first
+    // First, check for portable installations (Windows)
+    if (platformName === 'win32') {
+      const portablePath = getPortableBinaryPath(binary);
+      if (portablePath && existsSync(portablePath)) {
+        logger.debug(`Using portable ${binary}: ${portablePath}`);
+        return portablePath;
+      }
+    }
+    
+    // For wp-cli, check the downloaded version
     if (binary === 'wp-cli') {
       const wpCliPath = path.join(
         __dirname, '../../../',
@@ -112,42 +156,54 @@ export async function checkWordPressBinaries(): Promise<{
       for (const binary of binaries) {
         let found = false;
         
-        if (binary === 'php') {
-          try {
-            const phpPath = which.sync('php');
-            logger.info(`✅ Found system PHP at ${phpPath}`);
+        // First check for portable installations on Windows
+        if (platform() === 'win32') {
+          const portablePath = getPortableBinaryPath(binary);
+          if (portablePath && existsSync(portablePath)) {
+            logger.info(`✅ Found portable ${binary} at ${portablePath}`);
             found = true;
-          } catch (error) {
-            logger.warn(`❌ System PHP not found: ${error}`);
           }
-        } else if (binary === 'mysqld') {
-          // Check for MySQL in various forms
-          try {
-            const mysqlPath = which.sync('mysqld');
-            logger.info(`✅ Found system mysqld at ${mysqlPath}`);
-            found = true;
-          } catch {
+        }
+        
+        // If not found in portable, check system binaries
+        if (!found) {
+          if (binary === 'php') {
             try {
-              const mysqlPath = which.sync('mysql.server');
-              logger.info(`✅ Found system mysql.server at ${mysqlPath}`);
+              const phpPath = which.sync('php');
+              logger.info(`✅ Found system PHP at ${phpPath}`);
+              found = true;
+            } catch (error) {
+              logger.warn(`❌ System PHP not found: ${error}`);
+            }
+          } else if (binary === 'mysqld') {
+            // Check for MySQL in various forms
+            try {
+              const mysqlPath = which.sync('mysqld');
+              logger.info(`✅ Found system mysqld at ${mysqlPath}`);
               found = true;
             } catch {
               try {
-                const mysqlPath = which.sync('mysql');
-                logger.info(`✅ Found system mysql at ${mysqlPath}`);
+                const mysqlPath = which.sync('mysql.server');
+                logger.info(`✅ Found system mysql.server at ${mysqlPath}`);
                 found = true;
-              } catch (error) {
-                logger.warn(`❌ No MySQL binary found: ${error}`);
+              } catch {
+                try {
+                  const mysqlPath = which.sync('mysql');
+                  logger.info(`✅ Found system mysql at ${mysqlPath}`);
+                  found = true;
+                } catch (error) {
+                  logger.warn(`❌ No MySQL binary found: ${error}`);
+                }
               }
             }
-          }
-        } else if (binary === 'wp-cli') {
-          try {
-            const wpPath = which.sync('wp');
-            logger.info(`✅ Found system WP-CLI at ${wpPath}`);
-            found = true;
-          } catch (error) {
-            logger.warn(`❌ System WP-CLI not found: ${error}`);
+          } else if (binary === 'wp-cli') {
+            try {
+              const wpPath = which.sync('wp');
+              logger.info(`✅ Found system WP-CLI at ${wpPath}`);
+              found = true;
+            } catch (error) {
+              logger.warn(`❌ System WP-CLI not found: ${error}`);
+            }
           }
         }
         

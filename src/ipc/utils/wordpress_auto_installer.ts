@@ -7,6 +7,7 @@ import { createWriteStream } from 'fs';
 import path from 'path';
 import { app } from 'electron';
 import https from 'https';
+import { getInstallationGuidance, logInstallationGuidance } from './wordpress_installation_guide';
 
 const execAsync = promisify(exec);
 const logger = log.scope('wordpress-auto-installer');
@@ -93,12 +94,214 @@ async function installOnWindows(missing: string[]): Promise<{ installed: string[
   
   logger.info('🪟 Installing WordPress dependencies on Windows...');
   
+  // Try portable installations first (no admin required)
+  for (const dependency of missing) {
+    try {
+      let success = false;
+      
+      if (dependency === 'php') {
+        success = await installPortablePHP();
+      } else if (dependency === 'mysql') {
+        success = await installPortableMySQL();
+      } else if (dependency === 'wp-cli') {
+        success = await installWpCliManually();
+      }
+      
+      if (success) {
+        logger.info(`✅ ${dependency} installed successfully (portable)`);
+        installed.push(dependency);
+      } else {
+        errors.push(`Failed to install portable ${dependency}`);
+      }
+    } catch (error) {
+      logger.error(`❌ Error installing portable ${dependency}:`, error);
+      errors.push(`Error installing portable ${dependency}: ${error}`);
+    }
+  }
+  
+  // If portable installation failed, try Chocolatey as fallback
+  const stillMissing = missing.filter(dep => !installed.includes(dep));
+  if (stillMissing.length > 0) {
+    logger.info('⚠️ Some portable installations failed, trying Chocolatey as fallback...');
+    
+    // Check if we can run elevated commands
+    const isElevated = await checkIfElevated();
+    if (!isElevated) {
+      logger.warn('⚠️ Not running as administrator - Chocolatey installations may fail');
+      logger.info('💡 Consider running as administrator or installing dependencies manually');
+      
+      // Add helpful error message for user
+      for (const dep of stillMissing) {
+        errors.push(`${dep} requires administrator privileges for automatic installation. Please install manually or run Dyad as administrator.`);
+      }
+      
+      return { installed, errors };
+    }
+    
+    const chocoResult = await tryChocolateyInstallation(stillMissing);
+    installed.push(...chocoResult.installed);
+    errors.push(...chocoResult.errors);
+  }
+  
+  return { installed, errors };
+}
+
+/**
+ * Check if running with elevated privileges
+ */
+async function checkIfElevated(): Promise<boolean> {
+  try {
+    // Try to access a location that requires admin privileges
+    await execAsync('net session >nul 2>&1');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Install portable PHP for Windows (no admin required)
+ */
+async function installPortablePHP(): Promise<boolean> {
+  try {
+    logger.info('📥 Installing portable PHP for Windows...');
+    
+    const userDir = app.getPath('userData');
+    const phpDir = path.join(userDir, 'portable', 'php');
+    const phpUrl = 'https://windows.php.net/downloads/releases/php-8.2.13-nts-Win32-vs16-x64.zip';
+    const zipPath = path.join(userDir, 'php.zip');
+    
+    // Create directory
+    await fs.mkdir(phpDir, { recursive: true });
+    
+    // Download PHP
+    await downloadFile(phpUrl, zipPath);
+    
+    // Extract ZIP (simplified - in real implementation, use a proper zip library)
+    await execAsync(`powershell -Command "Expand-Archive -Path '${zipPath}' -DestinationPath '${phpDir}' -Force"`);
+    
+    // Add to PATH in user environment
+    const phpExe = path.join(phpDir, 'php.exe');
+    await addToUserPath(path.dirname(phpExe));
+    
+    // Clean up
+    await fs.unlink(zipPath);
+    
+    logger.info(`✅ Portable PHP installed at ${phpExe}`);
+    return true;
+  } catch (error) {
+    logger.error('❌ Failed to install portable PHP:', error);
+    return false;
+  }
+}
+
+/**
+ * Install portable MySQL for Windows (no admin required)
+ */
+async function installPortableMySQL(): Promise<boolean> {
+  try {
+    logger.info('📥 Installing portable MySQL for Windows...');
+    
+    const userDir = app.getPath('userData');
+    const mysqlDir = path.join(userDir, 'portable', 'mysql');
+    const mysqlUrl = 'https://dev.mysql.com/get/Downloads/MySQL-8.0/mysql-8.0.35-winx64.zip';
+    const zipPath = path.join(userDir, 'mysql.zip');
+    
+    // Create directory
+    await fs.mkdir(mysqlDir, { recursive: true });
+    
+    // Download MySQL
+    await downloadFile(mysqlUrl, zipPath);
+    
+    // Extract ZIP
+    await execAsync(`powershell -Command "Expand-Archive -Path '${zipPath}' -DestinationPath '${mysqlDir}' -Force"`);
+    
+    // Find the extracted folder (MySQL extracts to a subfolder)
+    const contents = await fs.readdir(mysqlDir);
+    const mysqlSubDir = contents.find(item => item.startsWith('mysql-'));
+    if (!mysqlSubDir) {
+      throw new Error('MySQL extraction folder not found');
+    }
+    
+    const mysqlBinDir = path.join(mysqlDir, mysqlSubDir, 'bin');
+    await addToUserPath(mysqlBinDir);
+    
+    // Initialize MySQL data directory
+    const dataDir = path.join(mysqlDir, 'data');
+    await fs.mkdir(dataDir, { recursive: true });
+    
+    const mysqldPath = path.join(mysqlBinDir, 'mysqld.exe');
+    await execAsync(`"${mysqldPath}" --initialize-insecure --datadir="${dataDir}"`);
+    
+    // Clean up
+    await fs.unlink(zipPath);
+    
+    logger.info(`✅ Portable MySQL installed at ${mysqlBinDir}`);
+    return true;
+  } catch (error) {
+    logger.error('❌ Failed to install portable MySQL:', error);
+    return false;
+  }
+}
+
+/**
+ * Add directory to user PATH environment variable
+ */
+async function addToUserPath(directory: string): Promise<void> {
+  try {
+    const command = `setx PATH "%PATH%;${directory}"`;
+    await execAsync(command);
+    logger.info(`✅ Added ${directory} to user PATH`);
+  } catch (error) {
+    logger.warn(`⚠️ Failed to add ${directory} to PATH:`, error);
+  }
+}
+
+/**
+ * Download file from URL
+ */
+async function downloadFile(url: string, outputPath: string): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const file = createWriteStream(outputPath);
+    
+    https.get(url, (response) => {
+      if (response.statusCode === 302 || response.statusCode === 301) {
+        // Handle redirect
+        return downloadFile(response.headers.location!, outputPath).then(resolve).catch(reject);
+      }
+      
+      if (response.statusCode !== 200) {
+        reject(new Error(`Download failed: ${response.statusCode}`));
+        return;
+      }
+      
+      response.pipe(file);
+      
+      file.on('finish', () => {
+        file.close();
+        resolve();
+      });
+      
+      file.on('error', (error) => {
+        fs.unlink(outputPath).catch(() => {}); // Clean up on error
+        reject(error);
+      });
+    }).on('error', reject);
+  });
+}
+
+/**
+ * Try Chocolatey installation (fallback method)
+ */
+async function tryChocolateyInstallation(missing: string[]): Promise<{ installed: string[]; errors: string[] }> {
+  const installed: string[] = [];
+  const errors: string[] = [];
+  
   // Check if Chocolatey is installed
   const chocoExists = await commandExists('choco');
   if (!chocoExists.exists) {
     logger.info('📦 Installing Chocolatey package manager...');
     try {
-      // Install Chocolatey
       const installChocolatey = `
         Set-ExecutionPolicy Bypass -Scope Process -Force;
         [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072;
@@ -128,7 +331,7 @@ async function installOnWindows(missing: string[]): Promise<{ installed: string[
     }
   }
   
-  // Install missing dependencies
+  // Install missing dependencies with Chocolatey
   for (const dependency of missing) {
     try {
       let packageName: string;
@@ -150,7 +353,7 @@ async function installOnWindows(missing: string[]): Promise<{ installed: string[
       logger.info(`📦 Installing ${dependency} via Chocolatey...`);
       
       await new Promise<void>((resolve, reject) => {
-        const child = spawn('choco', ['install', packageName, '-y'], {
+        const child = spawn('choco', ['install', packageName, '-y', '--confirm'], {
           stdio: 'pipe'
         });
         
@@ -165,12 +368,12 @@ async function installOnWindows(missing: string[]): Promise<{ installed: string[
         
         child.on('close', (code) => {
           if (code === 0) {
-            logger.info(`✅ ${dependency} installed successfully`);
+            logger.info(`✅ ${dependency} installed successfully via Chocolatey`);
             installed.push(dependency);
             resolve();
           } else {
-            logger.error(`❌ Failed to install ${dependency}:`, output);
-            errors.push(`Failed to install ${dependency}: ${output}`);
+            logger.error(`❌ Failed to install ${dependency} via Chocolatey:`, output);
+            errors.push(`Failed to install ${dependency} via Chocolatey: Admin privileges may be required`);
             reject(new Error(`Installation failed with code ${code}`));
           }
         });
@@ -179,8 +382,8 @@ async function installOnWindows(missing: string[]): Promise<{ installed: string[
       });
       
     } catch (error) {
-      logger.error(`❌ Error installing ${dependency}:`, error);
-      errors.push(`Error installing ${dependency}: ${error}`);
+      logger.error(`❌ Error installing ${dependency} via Chocolatey:`, error);
+      errors.push(`Error installing ${dependency} via Chocolatey: ${error}`);
     }
   }
   
@@ -306,9 +509,15 @@ async function installWpCliManually(): Promise<boolean> {
     logger.info('📥 Installing WP-CLI manually...');
     
     const wpCliUrl = 'https://github.com/wp-cli/wp-cli/releases/download/v2.10.0/wp-cli-2.10.0.phar';
-    const tempDir = app.getPath('temp');
-    const wpCliPath = path.join(tempDir, 'wp-cli.phar');
-    const targetPath = platform() === 'win32' ? 'C:\\wp-cli\\wp.bat' : '/usr/local/bin/wp';
+    const userDir = app.getPath('userData');
+    const wpCliDir = path.join(userDir, 'portable', 'wp-cli');
+    const wpCliPath = path.join(wpCliDir, 'wp-cli.phar');
+    const targetPath = platform() === 'win32' 
+      ? path.join(wpCliDir, 'wp.bat')
+      : '/usr/local/bin/wp';
+    
+    // Create directory
+    await fs.mkdir(wpCliDir, { recursive: true });
     
     // Download WP-CLI
     await new Promise<void>((resolve, reject) => {
@@ -334,12 +543,14 @@ async function installWpCliManually(): Promise<boolean> {
       }).on('error', reject);
     });
     
-    // Make it executable and move to target location
+    // Make it executable and create wrapper
     if (platform() === 'win32') {
       // Windows: Create batch file wrapper
       const batchContent = `@echo off\nphp "${wpCliPath}" %*`;
-      await fs.mkdir(path.dirname(targetPath), { recursive: true });
       await fs.writeFile(targetPath, batchContent);
+      
+      // Add to user PATH
+      await addToUserPath(wpCliDir);
     } else {
       // Unix-like: Make executable and move
       await execAsync(`chmod +x "${wpCliPath}"`);
@@ -378,6 +589,10 @@ export async function autoInstallDependencies(): Promise<InstallationResult> {
   }
   
   logger.info(`📦 Missing dependencies: ${missing.join(', ')}`);
+  
+  // Provide installation guidance
+  const guidance = getInstallationGuidance(missing);
+  logInstallationGuidance(guidance);
   
   const platformName = platform();
   let installed: string[] = [];

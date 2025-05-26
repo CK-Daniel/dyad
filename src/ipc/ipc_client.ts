@@ -903,4 +903,14 @@ export class IpcClient {
   }> {
     return this.ipcRenderer.invoke("wordpress:install-dependencies");
   }
+
+  public async wordpressGetInstallationGuidance(): Promise<{
+    platform: string;
+    missingDependencies: string[];
+    automaticOptions: string[];
+    manualInstructions: string[];
+    troubleshootingTips: string[];
+  }> {
+    return this.ipcRenderer.invoke("wordpress:get-installation-guidance");
+  }
 }
