@@ -19,6 +19,7 @@ import { registerReleaseNoteHandlers } from "./handlers/release_note_handlers";
 import { registerImportHandlers } from "./handlers/import_handlers";
 import { registerSessionHandlers } from "./handlers/session_handlers";
 import { registerWordPressHandlers } from "./handlers/wordpress_handlers";
+import { registerWordPressDependenciesHandlers } from "./handlers/wordpress_dependencies_handlers";
 
 export function registerIpcHandlers() {
   // Register all IPC handlers by category
@@ -43,4 +44,5 @@ export function registerIpcHandlers() {
   registerImportHandlers();
   registerSessionHandlers();
   registerWordPressHandlers();
+  registerWordPressDependenciesHandlers();
 }

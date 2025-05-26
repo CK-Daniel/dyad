@@ -880,4 +880,27 @@ export class IpcClient {
   }> {
     return this.ipcRenderer.invoke("wordpress:check-binaries");
   }
+
+  // WordPress Dependencies Management
+  public async wordpressIsReady(): Promise<boolean> {
+    return this.ipcRenderer.invoke("wordpress:is-ready");
+  }
+
+  public async wordpressGetStatus(): Promise<{
+    ready: boolean;
+    dependencies: {
+      php: { available: boolean; version?: string };
+      mysql: { available: boolean; version?: string };
+      wpCli: { available: boolean; version?: string };
+    };
+  }> {
+    return this.ipcRenderer.invoke("wordpress:get-status");
+  }
+
+  public async wordpressInstallDependencies(): Promise<{
+    success: boolean;
+    message: string;
+  }> {
+    return this.ipcRenderer.invoke("wordpress:install-dependencies");
+  }
 }

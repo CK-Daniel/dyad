@@ -5,6 +5,7 @@ import fs from 'fs/promises';
 import { existsSync } from 'fs';
 import { getAvailablePort } from './port_utils';
 import log from 'electron-log';
+import { ensureWordPressDependencies } from './wordpress_auto_installer';
 
 const logger = log.scope('wordpress-binary-utils');
 
@@ -93,16 +94,18 @@ export function getWordPressBinaryPath(binary: WordPressBinary): string {
 
 /**
  * Check if WordPress binaries are available for the current platform
+ * Automatically installs missing dependencies if possible
  */
 export async function checkWordPressBinaries(): Promise<{
   available: boolean;
   missing: string[];
 }> {
-  const binaries: WordPressBinary[] = ['php', 'mysqld'];
-  const missing: string[] = [];
+  const binaries: WordPressBinary[] = ['php', 'mysqld', 'wp-cli'];
+  let missing: string[] = [];
   
   // In development, check system binaries first
   if (!app.isPackaged) {
+    logger.info('🔍 Checking system binaries (development mode)...');
     try {
       const which = require('which');
       
@@ -112,31 +115,39 @@ export async function checkWordPressBinaries(): Promise<{
         if (binary === 'php') {
           try {
             const phpPath = which.sync('php');
-            logger.debug(`Found system PHP at ${phpPath}`);
+            logger.info(`✅ Found system PHP at ${phpPath}`);
             found = true;
-          } catch {
-            logger.debug('System PHP not found');
+          } catch (error) {
+            logger.warn(`❌ System PHP not found: ${error}`);
           }
         } else if (binary === 'mysqld') {
           // Check for MySQL in various forms
           try {
             const mysqlPath = which.sync('mysqld');
-            logger.debug(`Found system mysqld at ${mysqlPath}`);
+            logger.info(`✅ Found system mysqld at ${mysqlPath}`);
             found = true;
           } catch {
             try {
               const mysqlPath = which.sync('mysql.server');
-              logger.debug(`Found system mysql.server at ${mysqlPath}`);
+              logger.info(`✅ Found system mysql.server at ${mysqlPath}`);
               found = true;
             } catch {
               try {
                 const mysqlPath = which.sync('mysql');
-                logger.debug(`Found system mysql at ${mysqlPath}`);
+                logger.info(`✅ Found system mysql at ${mysqlPath}`);
                 found = true;
-              } catch {
-                logger.debug('No MySQL binary found');
+              } catch (error) {
+                logger.warn(`❌ No MySQL binary found: ${error}`);
               }
             }
+          }
+        } else if (binary === 'wp-cli') {
+          try {
+            const wpPath = which.sync('wp');
+            logger.info(`✅ Found system WP-CLI at ${wpPath}`);
+            found = true;
+          } catch (error) {
+            logger.warn(`❌ System WP-CLI not found: ${error}`);
           }
         }
         
@@ -147,13 +158,85 @@ export async function checkWordPressBinaries(): Promise<{
       
       // If we found system binaries, return success
       if (missing.length === 0) {
+        logger.info('🎉 All system binaries found successfully!');
         return {
           available: true,
           missing: []
         };
       }
       
-      logger.warn('Some system binaries missing, checking bundled versions');
+      logger.warn(`⚠️ Some system binaries missing: ${missing.join(', ')}`);
+      
+      // Attempt auto-installation of missing dependencies
+      logger.info('🔧 Attempting to auto-install missing WordPress dependencies...');
+      try {
+        const installationSuccess = await ensureWordPressDependencies();
+        if (installationSuccess) {
+          logger.info('✅ Auto-installation completed, re-checking binaries...');
+          
+          // Re-check binaries after installation
+          missing.length = 0; // Reset
+          for (const binary of binaries) {
+            let found = false;
+            
+            if (binary === 'php') {
+              try {
+                const phpPath = which.sync('php');
+                logger.info(`✅ Found system PHP at ${phpPath} (after installation)`);
+                found = true;
+              } catch {
+                logger.debug('System PHP still not found after installation');
+              }
+            } else if (binary === 'mysqld') {
+              try {
+                const mysqlPath = which.sync('mysqld');
+                logger.info(`✅ Found system mysqld at ${mysqlPath} (after installation)`);
+                found = true;
+              } catch {
+                try {
+                  const mysqlPath = which.sync('mysql.server');
+                  logger.info(`✅ Found system mysql.server at ${mysqlPath} (after installation)`);
+                  found = true;
+                } catch {
+                  try {
+                    const mysqlPath = which.sync('mysql');
+                    logger.info(`✅ Found system mysql at ${mysqlPath} (after installation)`);
+                    found = true;
+                  } catch {
+                    logger.debug('No MySQL binary found after installation');
+                  }
+                }
+              }
+            } else if (binary === 'wp-cli') {
+              try {
+                const wpPath = which.sync('wp');
+                logger.info(`✅ Found system WP-CLI at ${wpPath} (after installation)`);
+                found = true;
+              } catch {
+                logger.debug('System WP-CLI not found after installation');
+              }
+            }
+            
+            if (!found) {
+              missing.push(binary);
+            }
+          }
+          
+          if (missing.length === 0) {
+            logger.info('🎉 All system binaries found after auto-installation!');
+            return {
+              available: true,
+              missing: []
+            };
+          }
+        } else {
+          logger.warn('⚠️ Auto-installation failed or incomplete');
+        }
+      } catch (autoInstallError) {
+        logger.error('❌ Auto-installation error:', autoInstallError);
+      }
+      
+      logger.warn('📦 Falling back to bundled versions...');
       missing.length = 0; // Reset for bundled check
     } catch (error) {
       logger.warn('Error checking system binaries:', error);

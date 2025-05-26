@@ -9,6 +9,7 @@ import log from "electron-log";
 import { readSettings, writeSettings } from "./main/settings";
 import { handleSupabaseOAuthReturn } from "./supabase_admin/supabase_return_handler";
 import { handleDyadProReturn } from "./main/pro";
+import { performStartupWordPressCheck } from "./ipc/utils/wordpress_startup_check";
 
 log.errorHandler.startCatching();
 log.eventLogger.startLogging();
@@ -144,13 +145,18 @@ if (!gotTheLock) {
   });
 
   // Create mainWindow, load the rest of the app, etc...
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
     createWindow();
+    
+    // Perform WordPress dependencies check in the background
+    performStartupWordPressCheck().catch(error => {
+      logger.warn('WordPress startup check failed:', error);
+    });
   });
 }
 
 // Handle the protocol. In this case, we choose to show an Error Box.
-app.on("open-url", (event, url) => {
+app.on("open-url", (_event, url) => {
   handleDeepLinkReturn(url);
 });
 
