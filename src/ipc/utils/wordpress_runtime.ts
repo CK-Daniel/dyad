@@ -161,6 +161,11 @@ export class WordPressRuntime {
       '--log-error-verbosity=3'
     ];
     
+    // Add user parameter for initialization too
+    if (process.platform !== 'win32') {
+      initArgs.push(`--user=${process.env.USER || process.env.USERNAME || 'mysql'}`);
+    }
+    
     // Add version-specific initialization parameters
     if (mysqlVersion) {
       logger.info(`MySQL ${mysqlVersion.major}.${mysqlVersion.minor} detected for initialization`);
@@ -306,6 +311,13 @@ export class WordPressRuntime {
       '--console',
       '--log-error-verbosity=3'
     ];
+    
+    // Add user parameter to avoid running as root (MySQL security requirement)
+    if (process.platform !== 'win32') {
+      // On Unix-like systems, MySQL refuses to run as root without special flags
+      // Use the current user instead
+      mysqlArgs.push(`--user=${process.env.USER || process.env.USERNAME || 'mysql'}`);
+    }
     
     // Add version-specific parameters
     if (mysqlVersion) {
