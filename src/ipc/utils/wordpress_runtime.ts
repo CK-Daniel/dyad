@@ -299,22 +299,24 @@ export class WordPressRuntime {
     
     // Add version-specific parameters
     if (mysqlVersion) {
-      // MySQL 8.0 introduced changes to authentication
-      if (mysqlVersion.major === 8 && mysqlVersion.minor === 0) {
-        // For MySQL 8.0.x, we can use default-authentication-plugin
+      logger.info(`MySQL version detected: ${mysqlVersion.major}.${mysqlVersion.minor}.${mysqlVersion.patch}`);
+      
+      // MySQL 9.x and 8.1+ don't support default-authentication-plugin
+      if (mysqlVersion.major >= 9 || (mysqlVersion.major === 8 && mysqlVersion.minor >= 1)) {
+        // For MySQL 8.1+ and 9.x, default-authentication-plugin is deprecated/removed
+        // We'll handle authentication via ALTER USER command after startup
+        logger.info(`MySQL ${mysqlVersion.major}.${mysqlVersion.minor} detected - avoiding deprecated authentication parameters`);
+      } else if (mysqlVersion.major === 8 && mysqlVersion.minor === 0) {
+        // ONLY MySQL 8.0.x still supports default-authentication-plugin
+        logger.info(`MySQL 8.0.x detected - using default-authentication-plugin`);
         mysqlArgs.push('--default-authentication-plugin=mysql_native_password');
-      } else if (mysqlVersion.major > 8 || (mysqlVersion.major === 8 && mysqlVersion.minor > 0)) {
-        // For MySQL 8.1+ and 9.x, default-authentication-plugin is deprecated
-        // Use authentication-policy instead if needed
-        // Note: We'll handle authentication via ALTER USER command after startup
-        logger.info(`MySQL ${mysqlVersion.major}.${mysqlVersion.minor} detected - using modern authentication handling`);
       } else if (mysqlVersion.major < 8) {
         // MySQL 5.7 and earlier - no special authentication handling needed
         logger.info(`MySQL ${mysqlVersion.major}.${mysqlVersion.minor} detected - using legacy configuration`);
       }
     } else {
       // If we couldn't detect version, assume modern MySQL and avoid deprecated options
-      logger.warn('Could not detect MySQL version - using safe defaults');
+      logger.warn('Could not detect MySQL version - using safe defaults without deprecated parameters');
     }
     
     const mysql = spawn(mysqldPath, mysqlArgs, {
