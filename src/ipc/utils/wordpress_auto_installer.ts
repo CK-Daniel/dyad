@@ -8,6 +8,7 @@ import path from 'path';
 import { app } from 'electron';
 import https from 'https';
 import { getInstallationGuidance, logInstallationGuidance } from './wordpress_installation_guide';
+import { requestAdminPermission, showWordPressDependenciesDialog, isRunningAsAdmin } from './admin_permission_utils';
 
 const execAsync = promisify(exec);
 const logger = log.scope('wordpress-auto-installer');
@@ -119,45 +120,60 @@ async function installOnWindows(missing: string[]): Promise<{ installed: string[
     }
   }
   
-  // If portable installation failed, try Chocolatey as fallback
+  // If portable installation failed, offer system-wide installation
   const stillMissing = missing.filter(dep => !installed.includes(dep));
   if (stillMissing.length > 0) {
-    logger.info('⚠️ Some portable installations failed, trying Chocolatey as fallback...');
+    logger.info('⚠️ Some portable installations failed, checking for system-wide installation...');
     
-    // Check if we can run elevated commands
-    const isElevated = await checkIfElevated();
-    if (!isElevated) {
-      logger.warn('⚠️ Not running as administrator - Chocolatey installations may fail');
-      logger.info('💡 Consider running as administrator or installing dependencies manually');
-      
-      // Add helpful error message for user
+    // Show user-friendly dialog for choosing installation method
+    const userChoice = await showWordPressDependenciesDialog();
+    
+    if (userChoice === 'cancel') {
       for (const dep of stillMissing) {
-        errors.push(`${dep} requires administrator privileges for automatic installation. Please install manually or run Dyad as administrator.`);
+        errors.push(`${dep} installation was cancelled by user.`);
       }
-      
       return { installed, errors };
     }
     
-    const chocoResult = await tryChocolateyInstallation(stillMissing);
-    installed.push(...chocoResult.installed);
-    errors.push(...chocoResult.errors);
+    if (userChoice === 'install') {
+      // User chose system-wide installation
+      const isElevated = await isRunningAsAdmin();
+      
+      if (!isElevated) {
+        // Request admin permission
+        const permissionResult = await requestAdminPermission(
+          `Installing ${stillMissing.join(', ')} system-wide for WordPress development.`
+        );
+        
+        if (!permissionResult.granted) {
+          if (permissionResult.userCancelled) {
+            for (const dep of stillMissing) {
+              errors.push(`${dep} installation was cancelled by user.`);
+            }
+          } else {
+            for (const dep of stillMissing) {
+              errors.push(`${dep} requires administrator privileges. ${permissionResult.error || 'Please run Dyad as administrator.'}`);
+            }
+          }
+          return { installed, errors };
+        }
+      }
+      
+      // Proceed with system-wide installation
+      const chocoResult = await tryChocolateyInstallation(stillMissing);
+      installed.push(...chocoResult.installed);
+      errors.push(...chocoResult.errors);
+    } else {
+      // User chose portable but it failed
+      for (const dep of stillMissing) {
+        errors.push(`Failed to install portable ${dep}. Consider system-wide installation or manual setup.`);
+      }
+    }
   }
   
   return { installed, errors };
 }
 
-/**
- * Check if running with elevated privileges
- */
-async function checkIfElevated(): Promise<boolean> {
-  try {
-    // Try to access a location that requires admin privileges
-    await execAsync('net session >nul 2>&1');
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 /**
  * Install portable PHP for Windows (no admin required)
@@ -258,20 +274,36 @@ async function addToUserPath(directory: string): Promise<void> {
 }
 
 /**
- * Download file from URL
+ * Download file from URL with redirect handling
  */
-async function downloadFile(url: string, outputPath: string): Promise<void> {
+async function downloadFile(url: string, outputPath: string, maxRedirects: number = 5): Promise<void> {
   return new Promise<void>((resolve, reject) => {
+    if (maxRedirects <= 0) {
+      reject(new Error('Too many redirects'));
+      return;
+    }
+
     const file = createWriteStream(outputPath);
     
-    https.get(url, (response) => {
+    const handleResponse = (response: any) => {
       if (response.statusCode === 302 || response.statusCode === 301) {
-        // Handle redirect
-        return downloadFile(response.headers.location!, outputPath).then(resolve).catch(reject);
+        file.close();
+        fs.unlink(outputPath).catch(() => {}); // Clean up partial file
+        
+        const redirectUrl = response.headers.location;
+        if (!redirectUrl) {
+          reject(new Error('Redirect without location header'));
+          return;
+        }
+        
+        logger.debug(`Following redirect to: ${redirectUrl}`);
+        return downloadFile(redirectUrl, outputPath, maxRedirects - 1).then(resolve).catch(reject);
       }
       
       if (response.statusCode !== 200) {
-        reject(new Error(`Download failed: ${response.statusCode}`));
+        file.close();
+        fs.unlink(outputPath).catch(() => {}); // Clean up partial file
+        reject(new Error(`Download failed: ${response.statusCode} ${response.statusMessage}`));
         return;
       }
       
@@ -286,7 +318,17 @@ async function downloadFile(url: string, outputPath: string): Promise<void> {
         fs.unlink(outputPath).catch(() => {}); // Clean up on error
         reject(error);
       });
-    }).on('error', reject);
+    };
+
+    // Use https for https URLs, http for http URLs
+    const isHttps = url.startsWith('https:');
+    const client = isHttps ? https : require('http');
+    
+    client.get(url, handleResponse).on('error', (error: Error) => {
+      file.close();
+      fs.unlink(outputPath).catch(() => {}); // Clean up on error
+      reject(error);
+    });
   });
 }
 

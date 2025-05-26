@@ -1,0 +1,5 @@
+20/feb/2018: Hi! We seem to be receiving high volume requests coming from empty user agents. While this shouldn't be an issue, this unfortunately resulted in bandwidth issues on this server causing all downloads to be unavailable. We've therefore decided to temporarily block empty user agents until we upgraded our server bandwidth.
+
+03/mar/2018: We've upgraded the server bandwidth. This is however still not sufficient to handle all empty user agent connections. Please update the user agent in your scripts accordingly or contact us so we can discuss it.
+
+Thank you for your understanding. 

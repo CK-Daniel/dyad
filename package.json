@@ -24,7 +24,8 @@
     "publish": "npm run clean && electron-forge publish",
     "ts": "npx tsc -p tsconfig.app.json --noEmit",
     "download-wordpress-binaries": "tsx scripts/download-wordpress-binaries.ts",
-    "prepackage": "npm run download-wordpress-binaries",
+    "download-wordpress-runtime": "tsx scripts/download-wordpress-runtime.ts",
+    "prepackage": "npm run download-wordpress-runtime",
     "lint": "npx oxlint --fix",
     "lint:fix": "npx oxlint --fix --fix-suggestions --fix-dangerously",
     "db:generate": "drizzle-kit generate",
@@ -77,6 +78,7 @@
     "lint-staged": "^15.5.2",
     "oxlint": "^0.16.9",
     "prettier": "3.5.3",
+    "tsx": "^4.19.4",
     "typescript": "^5.8.3",
     "vite": "^5.4.17",
     "vitest": "^3.1.4"
