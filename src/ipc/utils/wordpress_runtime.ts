@@ -161,9 +161,17 @@ export class WordPressRuntime {
       '--log-error-verbosity=3'
     ];
     
-    // Add user parameter for initialization too
-    if (process.platform !== 'win32') {
-      initArgs.push(`--user=${process.env.USER || process.env.USERNAME || 'mysql'}`);
+    // Handle MySQL 9.x initialization on macOS
+    if (process.platform === 'darwin' && mysqlVersion?.major >= 9) {
+      // MySQL 9.x on macOS needs special handling
+      // The initialization doesn't need user parameter as it's run differently
+      logger.info('MySQL 9.x on macOS - using special initialization');
+    } else if (process.platform !== 'win32') {
+      // For other Unix systems
+      const currentUser = process.env.USER || process.env.USERNAME;
+      if (currentUser && currentUser !== 'root') {
+        initArgs.push(`--user=${currentUser}`);
+      }
     }
     
     // Add version-specific initialization parameters
@@ -312,11 +320,32 @@ export class WordPressRuntime {
       '--log-error-verbosity=3'
     ];
     
-    // Add user parameter to avoid running as root (MySQL security requirement)
-    if (process.platform !== 'win32') {
-      // On Unix-like systems, MySQL refuses to run as root without special flags
-      // Use the current user instead
-      mysqlArgs.push(`--user=${process.env.USER || process.env.USERNAME || 'mysql'}`);
+    // Handle MySQL 9.x security requirements on macOS
+    if (process.platform === 'darwin' && mysqlVersion?.major >= 9) {
+      // MySQL 9.x on macOS (especially Homebrew) has strict security
+      // Create a custom config file to bypass root check
+      const configPath = path.join(appPath, '.wordpress-data', 'mysql.cnf');
+      const configContent = `[mysqld]
+# Allow running without root check
+user=${process.env.USER || 'mysql'}
+
+# Security settings for local development
+skip-grant-tables
+`;
+      
+      try {
+        await fs.writeFile(configPath, configContent, 'utf8');
+        mysqlArgs.unshift(`--defaults-file=${configPath}`);
+        logger.info('Created custom MySQL config for macOS MySQL 9.x');
+      } catch (error) {
+        logger.warn('Could not create MySQL config file:', error);
+      }
+    } else if (process.platform !== 'win32') {
+      // For other Unix systems or older MySQL versions
+      const currentUser = process.env.USER || process.env.USERNAME;
+      if (currentUser && currentUser !== 'root') {
+        mysqlArgs.push(`--user=${currentUser}`);
+      }
     }
     
     // Add version-specific parameters
