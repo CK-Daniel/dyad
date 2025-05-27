@@ -320,30 +320,21 @@ export class WordPressRuntime {
       '--log-error-verbosity=3'
     ];
     
-    // Handle MySQL 9.x security requirements on macOS
-    if (process.platform === 'darwin' && mysqlVersion?.major >= 9) {
-      // MySQL 9.x on macOS (especially Homebrew) has strict security
-      // Create a custom config file to bypass root check
-      const configPath = path.join(appPath, '.wordpress-data', 'mysql.cnf');
-      const configContent = `[mysqld]
-# Allow running without root check
-user=${process.env.USER || 'mysql'}
-
-# Security settings for local development
-skip-grant-tables
-`;
-      
-      try {
-        await fs.writeFile(configPath, configContent, 'utf8');
-        mysqlArgs.unshift(`--defaults-file=${configPath}`);
-        logger.info('Created custom MySQL config for macOS MySQL 9.x');
-      } catch (error) {
-        logger.warn('Could not create MySQL config file:', error);
-      }
-    } else if (process.platform !== 'win32') {
-      // For other Unix systems or older MySQL versions
+    // Handle MySQL user parameter based on platform and version
+    if (process.platform !== 'win32') {
       const currentUser = process.env.USER || process.env.USERNAME;
-      if (currentUser && currentUser !== 'root') {
+      
+      // MySQL 9.x on macOS has strict security - it refuses to run as root
+      // and doesn't need --user parameter when already running as non-root
+      if (process.platform === 'darwin' && mysqlVersion && mysqlVersion.major >= 9) {
+        if (currentUser === 'root') {
+          logger.error('MySQL 9.x on macOS cannot run as root user');
+          throw new Error('MySQL 9.x on macOS cannot run as root. Please run Dyad as a normal user.');
+        }
+        // Don't add --user parameter for MySQL 9.x on macOS when running as non-root
+        logger.info(`MySQL 9.x on macOS - running as user: ${currentUser}`);
+      } else if (currentUser && currentUser !== 'root') {
+        // For other Unix systems or older MySQL versions, add --user parameter
         mysqlArgs.push(`--user=${currentUser}`);
       }
     }
