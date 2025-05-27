@@ -162,12 +162,12 @@ export class WordPressRuntime {
     ];
     
     // Handle MySQL 9.x initialization on macOS
-    if (process.platform === 'darwin' && mysqlVersion?.major >= 9) {
-      // MySQL 9.x on macOS needs special handling
-      // The initialization doesn't need user parameter as it's run differently
-      logger.info('MySQL 9.x on macOS - using special initialization');
+    if (process.platform === 'darwin' && mysqlVersion && mysqlVersion.major >= 9) {
+      // MySQL 9.x on macOS has issues with --user parameter during initialization
+      // Do NOT add --user parameter
+      logger.info('MySQL 9.x on macOS - initializing without --user parameter');
     } else if (process.platform !== 'win32') {
-      // For other Unix systems
+      // For other Unix systems or older MySQL versions
       const currentUser = process.env.USER || process.env.USERNAME;
       if (currentUser && currentUser !== 'root') {
         initArgs.push(`--user=${currentUser}`);
@@ -320,19 +320,51 @@ export class WordPressRuntime {
       '--log-error-verbosity=3'
     ];
     
+    // Flag to track if we need to use wrapper script
+    let useWrapper = false;
+    let wrapperPath = '';
+    
     // Handle MySQL user parameter based on platform and version
     if (process.platform !== 'win32') {
       const currentUser = process.env.USER || process.env.USERNAME;
       
-      // MySQL 9.x on macOS has strict security - it refuses to run as root
-      // and doesn't need --user parameter when already running as non-root
+      // MySQL 9.x on macOS from Homebrew has a bug where it incorrectly detects
+      // non-root users as root. The workaround is to use a wrapper script
+      // that runs MySQL with a clean environment.
       if (process.platform === 'darwin' && mysqlVersion && mysqlVersion.major >= 9) {
         if (currentUser === 'root') {
           logger.error('MySQL 9.x on macOS cannot run as root user');
           throw new Error('MySQL 9.x on macOS cannot run as root. Please run Dyad as a normal user.');
         }
-        // Don't add --user parameter for MySQL 9.x on macOS when running as non-root
-        logger.info(`MySQL 9.x on macOS - running as user: ${currentUser}`);
+        
+        logger.info(`MySQL 9.x on macOS detected - preparing wrapper to avoid root detection bug`);
+        
+        // Create a wrapper script that runs MySQL with a clean environment
+        wrapperPath = path.join(appPath, '.wordpress-data', 'mysql-wrapper.sh');
+        const wrapperContent = `#!/bin/bash
+# MySQL 9.x wrapper for macOS to bypass root detection bug
+# This is a known issue with MySQL 9.x installed via Homebrew on macOS
+
+# Run mysqld with a clean environment to avoid detection issues
+exec /usr/bin/env -i \\
+    PATH="$PATH" \\
+    HOME="$HOME" \\
+    USER="${currentUser}" \\
+    LOGNAME="${currentUser}" \\
+    SHELL="$SHELL" \\
+    ${mysqldPath} "$@"
+`;
+        
+        try {
+          await fs.mkdir(path.dirname(wrapperPath), { recursive: true });
+          await fs.writeFile(wrapperPath, wrapperContent, 'utf8');
+          await fs.chmod(wrapperPath, 0o755);
+          useWrapper = true;
+          logger.info('MySQL wrapper script created successfully');
+        } catch (error) {
+          logger.warn('Could not create MySQL wrapper script:', error);
+          // Fall back to direct execution
+        }
       } else if (currentUser && currentUser !== 'root') {
         // For other Unix systems or older MySQL versions, add --user parameter
         mysqlArgs.push(`--user=${currentUser}`);
@@ -364,7 +396,10 @@ export class WordPressRuntime {
       logger.warn('Could not detect MySQL version - assuming MySQL 9.x and avoiding deprecated parameters');
     }
     
-    const mysql = spawn(mysqldPath, mysqlArgs, {
+    // Use wrapper script if needed (for MySQL 9.x on macOS)
+    const mysqlExecutable = useWrapper ? wrapperPath : mysqldPath;
+    
+    const mysql = spawn(mysqlExecutable, mysqlArgs, {
       cwd: appPath,
       env: { ...process.env },
       detached: false,
